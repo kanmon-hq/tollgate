@@ -66,11 +66,23 @@ type Config struct {
 	AdminAPIKey      string
 	Routes           []*RouteConfig
 	ForwardTargetURL string
-	DBBackend        string // "dynamodb" (default) | "sqlite" | "postgres"
+	DBBackend        string // "dynamodb" (default) | "sqlite" | "cosmosdb" | "firestore"
 	SQLitePath       string // default: "./tollgate.db"
-	PostgresDSN      string // e.g. "postgres://user:pass@localhost:5432/tollgate?sslmode=disable"
-	RateLimitBackend string // "memory" (default) | "dynamodb" | "redis"
-	// Redis / Valkey 接続設定 (RATE_LIMIT_BACKEND=redis 時のみ使用)
+
+	// Cosmos DB 接続設定 (DB_BACKEND=cosmosdb 時)
+	CosmosDBEndpoint  string // 例: "https://myaccount.documents.azure.com:443/"
+	CosmosDBKey       string // Azure Cosmos DB Primary/Secondary Key
+	CosmosDBDatabase  string // default: "tollgate"
+	CosmosDBContainer string // default: "api_keys"
+
+	// Firestore 接続設定 (DB_BACKEND=firestore 時)
+	FirestoreProjectID  string // Google Cloud Project ID
+	FirestoreDatabaseID string // default: "(default)"
+	FirestoreCollection string // default: "api_keys"
+
+	RateLimitBackend string // "memory" (default) | "redis" | "valkey" | "two-tier" | "dynamodb" | "none"
+
+	// Redis / Valkey 接続設定 (RATE_LIMIT_BACKEND=redis / valkey / two-tier 時)
 	RedisAddr     string // 例: "redis:6379"
 	RedisPassword string // 認証パスワード (不要な場合は空文字)
 	RedisDB       int    // 使用する DB 番号 (0-15, デフォルト: 0)
@@ -108,16 +120,27 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to load proxy routes: %w", err)
 	}
 
-	// DB バックエンド (dynamodb | sqlite | postgres, デフォルト: dynamodb)
+	// DB バックエンド (dynamodb | sqlite | cosmosdb | firestore, デフォルト: dynamodb)
 	dbBackend := strings.ToLower(cmp.Or(os.Getenv("DB_BACKEND"), "dynamodb"))
 	sqlitePath := cmp.Or(os.Getenv("SQLITE_PATH"), "./tollgate.db")
-	postgresDSN := cmp.Or(os.Getenv("POSTGRES_DSN"), os.Getenv("DATABASE_URL"))
 
-	// レートリミットバックエンド (memory | dynamodb | redis, デフォルト: memory)
+	cosmosEndpoint := os.Getenv("COSMOSDB_ENDPOINT")
+	cosmosKey := os.Getenv("COSMOSDB_KEY")
+	cosmosDB := cmp.Or(os.Getenv("COSMOSDB_DATABASE"), "tollgate")
+	cosmosContainer := cmp.Or(os.Getenv("COSMOSDB_CONTAINER"), "api_keys")
+
+	firestoreProjectID := os.Getenv("FIRESTORE_PROJECT_ID")
+	firestoreDatabaseID := cmp.Or(os.Getenv("FIRESTORE_DATABASE_ID"), "(default)")
+	firestoreCollection := cmp.Or(os.Getenv("FIRESTORE_COLLECTION"), "api_keys")
+
+	// レートリミットバックエンド (memory | redis | valkey | two-tier | dynamodb | none, デフォルト: memory)
 	rateLimitBackend := strings.ToLower(cmp.Or(os.Getenv("RATE_LIMIT_BACKEND"), "memory"))
+	if rateLimitBackend == "two_tier" || rateLimitBackend == "tiered" {
+		rateLimitBackend = "two-tier"
+	}
 
-	// SQLite の場合は外部依存ゼロ・キャッシュなし・レートリミット memory を強制
-	if dbBackend == "sqlite" {
+	// SQLite の場合は外部依存ゼロ・キャッシュなし・レートリミット memory / none を強制
+	if dbBackend == "sqlite" && (rateLimitBackend != "none") {
 		rateLimitBackend = "memory"
 	}
 
@@ -132,23 +155,29 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Port:             port,
-		DynamoDBEndpoint: endpoint,
-		AWSRegion:        region,
-		TableName:        tableName,
-		OpenAPIPath:      openapiPath,
-		DocsPath:         docsPath,
-		KeyCacheTTL:      keyCacheTTL,
-		AdminAPIKey:      adminAPIKey,
-		Routes:           routes,
-		ForwardTargetURL: defaultTarget,
-		DBBackend:        dbBackend,
-		SQLitePath:       sqlitePath,
-		PostgresDSN:      postgresDSN,
-		RateLimitBackend: rateLimitBackend,
-		RedisAddr:        redisAddr,
-		RedisPassword:    redisPassword,
-		RedisDB:          redisDB,
+		Port:                port,
+		DynamoDBEndpoint:    endpoint,
+		AWSRegion:           region,
+		TableName:           tableName,
+		OpenAPIPath:         openapiPath,
+		DocsPath:            docsPath,
+		KeyCacheTTL:         keyCacheTTL,
+		AdminAPIKey:         adminAPIKey,
+		Routes:              routes,
+		ForwardTargetURL:    defaultTarget,
+		DBBackend:           dbBackend,
+		SQLitePath:          sqlitePath,
+		CosmosDBEndpoint:    cosmosEndpoint,
+		CosmosDBKey:         cosmosKey,
+		CosmosDBDatabase:    cosmosDB,
+		CosmosDBContainer:   cosmosContainer,
+		FirestoreProjectID:  firestoreProjectID,
+		FirestoreDatabaseID: firestoreDatabaseID,
+		FirestoreCollection: firestoreCollection,
+		RateLimitBackend:    rateLimitBackend,
+		RedisAddr:           redisAddr,
+		RedisPassword:       redisPassword,
+		RedisDB:             redisDB,
 	}, nil
 }
 

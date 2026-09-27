@@ -12,48 +12,19 @@ import (
 	"github.com/northfieldzz/tollgate/internal/domain/repository"
 )
 
-// Dialect はデータベース方言を表す型
-type Dialect int
-
-const (
-	DialectSQLite   Dialect = iota
-	DialectPostgres
-)
-
-// SQLRepository は database/sql を使う汎用 KeyRepository 実装。
-// SQLite と PostgreSQL の両方に対応する。
+// SQLRepository は database/sql を使う SQLite 向け KeyRepository 実装。
 type SQLRepository struct {
-	db      *sql.DB
-	dialect Dialect
+	db *sql.DB
 }
 
 var _ repository.KeyRepository = (*SQLRepository)(nil)
 
-// selectFields は SELECT/RETURNING で使うカラム一覧 (スペース注意)
+// selectFields は SELECT/RETURNING で使うカラム一覧
 const selectFields = `
     pk, key_id, key_prefix, name, tenant_id, service_id, scopes,
     status, is_active, rate_limit_rpm, monthly_quota,
     current_month, current_month_usage, expires_at, rotation_meta,
     last_used_at, created_at, updated_at`
-
-// rebind は ? プレースホルダーを PostgreSQL の $1, $2, ... 形式に変換する。
-// SQLite は ? をそのまま使う。
-func (r *SQLRepository) rebind(query string) string {
-	if r.dialect != DialectPostgres {
-		return query
-	}
-	var sb strings.Builder
-	n := 0
-	for _, c := range query {
-		if c == '?' {
-			n++
-			sb.WriteString(fmt.Sprintf("$%d", n))
-		} else {
-			sb.WriteRune(c)
-		}
-	}
-	return sb.String()
-}
 
 // ─── 書き込みヘルパー ─────────────────────────────────────────────────────────
 
@@ -168,7 +139,7 @@ func scanKey(row scanner) (*entity.APIKey, error) {
 // ─── KeyRepository 実装 ───────────────────────────────────────────────────────
 
 func (r *SQLRepository) PutKey(ctx context.Context, key *entity.APIKey) error {
-	q := r.rebind(`
+	q := `
 		INSERT INTO api_keys (
 			pk, key_id, key_prefix, name, tenant_id, service_id, scopes,
 			status, is_active, rate_limit_rpm, monthly_quota,
@@ -182,7 +153,7 @@ func (r *SQLRepository) PutKey(ctx context.Context, key *entity.APIKey) error {
 			monthly_quota=excluded.monthly_quota, current_month=excluded.current_month,
 			current_month_usage=excluded.current_month_usage, expires_at=excluded.expires_at,
 			rotation_meta=excluded.rotation_meta, last_used_at=excluded.last_used_at,
-			created_at=excluded.created_at, updated_at=excluded.updated_at`)
+			created_at=excluded.created_at, updated_at=excluded.updated_at`
 
 	_, err := r.db.ExecContext(ctx, q,
 		key.PK, key.KeyID, key.KeyPrefix, key.Name, key.TenantID, key.ServiceID,
@@ -199,7 +170,7 @@ func (r *SQLRepository) PutKey(ctx context.Context, key *entity.APIKey) error {
 
 func (r *SQLRepository) GetKeyByHash(ctx context.Context, keyHash string) (*entity.APIKey, error) {
 	pk := "KEY#" + keyHash
-	q := r.rebind(`SELECT` + selectFields + ` FROM api_keys WHERE pk = ?`)
+	q := `SELECT` + selectFields + ` FROM api_keys WHERE pk = ?`
 	row := r.db.QueryRowContext(ctx, q, pk)
 	key, err := scanKey(row)
 	if err == sql.ErrNoRows {
@@ -212,7 +183,7 @@ func (r *SQLRepository) GetKeyByHash(ctx context.Context, keyHash string) (*enti
 }
 
 func (r *SQLRepository) GetKeyByID(ctx context.Context, keyID string) (*entity.APIKey, error) {
-	q := r.rebind(`SELECT` + selectFields + ` FROM api_keys WHERE key_id = ? LIMIT 1`)
+	q := `SELECT` + selectFields + ` FROM api_keys WHERE key_id = ? LIMIT 1`
 	row := r.db.QueryRowContext(ctx, q, keyID)
 	key, err := scanKey(row)
 	if err == sql.ErrNoRows {
@@ -225,7 +196,7 @@ func (r *SQLRepository) GetKeyByID(ctx context.Context, keyID string) (*entity.A
 }
 
 func (r *SQLRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
-	q := r.rebind(`SELECT` + selectFields + ` FROM api_keys WHERE tenant_id = ? ORDER BY created_at DESC`)
+	q := `SELECT` + selectFields + ` FROM api_keys WHERE tenant_id = ? ORDER BY created_at DESC`
 	rows, err := r.db.QueryContext(ctx, q, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("sqlrepo ListKeysByTenant: %w", err)
@@ -246,7 +217,7 @@ func (r *SQLRepository) ListKeysByTenant(ctx context.Context, tenantID string) (
 func (r *SQLRepository) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
 	pk := "KEY#" + keyHash
 	now := time.Now().UTC().Format(time.RFC3339)
-	q := r.rebind(`UPDATE api_keys SET status = ?, is_active = ?, updated_at = ? WHERE pk = ?`)
+	q := `UPDATE api_keys SET status = ?, is_active = ?, updated_at = ? WHERE pk = ?`
 	_, err := r.db.ExecContext(ctx, q, string(status), boolToInt(isActive), now, pk)
 	if err != nil {
 		return fmt.Errorf("sqlrepo UpdateKeyStatus: %w", err)
@@ -279,7 +250,7 @@ func (r *SQLRepository) UpdateKeySettings(ctx context.Context, keyHash string, i
 	}
 	args = append(args, pk)
 
-	q := r.rebind(fmt.Sprintf("UPDATE api_keys SET %s WHERE pk = ?", strings.Join(sets, ", ")))
+	q := fmt.Sprintf("UPDATE api_keys SET %s WHERE pk = ?", strings.Join(sets, ", "))
 	if _, err := r.db.ExecContext(ctx, q, args...); err != nil {
 		return nil, fmt.Errorf("sqlrepo UpdateKeySettings: %w", err)
 	}
@@ -295,7 +266,7 @@ func (r *SQLRepository) RotateKey(ctx context.Context, params entity.RotateKeyPa
 
 	// 1. 旧キーを取得
 	oldKey, err := scanKey(tx.QueryRowContext(ctx,
-		r.rebind(`SELECT`+selectFields+` FROM api_keys WHERE pk = ?`),
+		`SELECT`+selectFields+` FROM api_keys WHERE pk = ?`,
 		"KEY#"+params.OldKeyHash,
 	))
 	if err == sql.ErrNoRows || oldKey == nil {
@@ -314,7 +285,7 @@ func (r *SQLRepository) RotateKey(ctx context.Context, params entity.RotateKeyPa
 		GracePeriodExpiresAt: params.GracePeriodExpiresAt,
 	}
 	rmJSON, _ := json.Marshal(rm)
-	q := r.rebind(`UPDATE api_keys SET status = ?, rotation_meta = ?, updated_at = ? WHERE pk = ?`)
+	q := `UPDATE api_keys SET status = ?, rotation_meta = ?, updated_at = ? WHERE pk = ?`
 	if _, err := tx.ExecContext(ctx, q, string(entity.StatusRotating), string(rmJSON), nowStr, "KEY#"+params.OldKeyHash); err != nil {
 		return nil, fmt.Errorf("sqlrepo RotateKey update old: %w", err)
 	}
@@ -328,7 +299,7 @@ func (r *SQLRepository) RotateKey(ctx context.Context, params entity.RotateKeyPa
 	newKey.Rotation = nil
 	newKey.UpdatedAt = nowStr
 
-	insertQ := r.rebind(`
+	insertQ := `
 		INSERT INTO api_keys (
 			pk, key_id, key_prefix, name, tenant_id, service_id, scopes,
 			status, is_active, rate_limit_rpm, monthly_quota,
@@ -337,7 +308,7 @@ func (r *SQLRepository) RotateKey(ctx context.Context, params entity.RotateKeyPa
 		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(pk) DO UPDATE SET
 			key_id=excluded.key_id, key_prefix=excluded.key_prefix, name=excluded.name,
-			status=excluded.status, is_active=excluded.is_active, updated_at=excluded.updated_at`)
+			status=excluded.status, is_active=excluded.is_active, updated_at=excluded.updated_at`
 
 	if _, err := tx.ExecContext(ctx, insertQ,
 		newKey.PK, newKey.KeyID, newKey.KeyPrefix, newKey.Name, newKey.TenantID, newKey.ServiceID,
@@ -357,7 +328,7 @@ func (r *SQLRepository) RotateKey(ctx context.Context, params entity.RotateKeyPa
 
 func (r *SQLRepository) DeleteKey(ctx context.Context, keyHash string) error {
 	pk := "KEY#" + keyHash
-	q := r.rebind(`DELETE FROM api_keys WHERE pk = ?`)
+	q := `DELETE FROM api_keys WHERE pk = ?`
 	_, err := r.db.ExecContext(ctx, q, pk)
 	if err != nil {
 		return fmt.Errorf("sqlrepo DeleteKey: %w", err)
@@ -368,19 +339,19 @@ func (r *SQLRepository) DeleteKey(ctx context.Context, keyHash string) error {
 func (r *SQLRepository) IncrementMonthlyUsage(ctx context.Context, keyHash, currentMonth string, delta int64) (int64, error) {
 	pk := "KEY#" + keyHash
 	// 月が変わっていればカウントをリセット、同月なら加算 (1 クエリでアトミック)
-	q := r.rebind(`
+	q := `
 		UPDATE api_keys
 		SET
 			current_month_usage = CASE WHEN current_month = ? THEN current_month_usage + ? ELSE ? END,
 			current_month = ?
-		WHERE pk = ?`)
+		WHERE pk = ?`
 
 	if _, err := r.db.ExecContext(ctx, q, currentMonth, delta, delta, currentMonth, pk); err != nil {
 		return 0, fmt.Errorf("sqlrepo IncrementMonthlyUsage: %w", err)
 	}
 
 	var usage int64
-	selQ := r.rebind(`SELECT current_month_usage FROM api_keys WHERE pk = ?`)
+	selQ := `SELECT current_month_usage FROM api_keys WHERE pk = ?`
 	if err := r.db.QueryRowContext(ctx, selQ, pk).Scan(&usage); err != nil {
 		return 0, fmt.Errorf("sqlrepo IncrementMonthlyUsage select: %w", err)
 	}
@@ -389,7 +360,7 @@ func (r *SQLRepository) IncrementMonthlyUsage(ctx context.Context, keyHash, curr
 
 func (r *SQLRepository) UpdateLastUsedAt(ctx context.Context, keyHash string, t time.Time) error {
 	pk := "KEY#" + keyHash
-	q := r.rebind(`UPDATE api_keys SET last_used_at = ? WHERE pk = ?`)
+	q := `UPDATE api_keys SET last_used_at = ? WHERE pk = ?`
 	_, err := r.db.ExecContext(ctx, q, t.UTC().Format(time.RFC3339), pk)
 	if err != nil {
 		return fmt.Errorf("sqlrepo UpdateLastUsedAt: %w", err)

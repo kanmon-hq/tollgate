@@ -16,10 +16,11 @@ type shard struct {
 // SlidingWindowLimiter は高並行・Goroutine セーフなインメモリ・スライディングウィンドウ式レートリミッター
 // 64 個のシャードに分散された Mutex により高負荷時のロック競合を最小化する
 type SlidingWindowLimiter struct {
-	shards [numShards]*shard
-	window time.Duration
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	shards   [numShards]*shard
+	window   time.Duration
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 func NewSlidingWindowLimiter(window time.Duration) *SlidingWindowLimiter {
@@ -96,8 +97,10 @@ func (l *SlidingWindowLimiter) Allow(id string, limitRPM int) (bool, int, time.D
 
 // Stop はバックグラウンドのクリーンアップ Goroutine を安全に停止する
 func (l *SlidingWindowLimiter) Stop() {
-	close(l.stopCh)
-	l.wg.Wait()
+	l.stopOnce.Do(func() {
+		close(l.stopCh)
+		l.wg.Wait()
+	})
 }
 
 func (l *SlidingWindowLimiter) cleanupLoop(interval time.Duration) {

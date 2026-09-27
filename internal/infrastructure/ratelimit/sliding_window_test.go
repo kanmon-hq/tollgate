@@ -66,3 +66,13 @@ func TestSlidingWindowLimiter_Concurrent(t *testing.T) {
 		<-done
 	}
 }
+
+func TestSlidingWindowLimiter_Unlimited(t *testing.T) {
+	limiter := NewSlidingWindowLimiter(time.Minute)
+	defer limiter.Stop()
+
+	allowed, rem, resetIn := limiter.Allow("unlimited-id", 0)
+	if !allowed || rem != 999999 || resetIn != 0 {
+		t.Errorf("unexpected unlimited: allowed=%v, rem=%d, resetIn=%v", allowed, rem, resetIn)
+	}
+}

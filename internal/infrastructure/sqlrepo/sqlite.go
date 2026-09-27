@@ -19,7 +19,7 @@ import (
 //
 // # 注意事項
 //   - SQLite は書き込み競合を防ぐため MaxOpenConns=1 に設定する
-//   - レートリミットは必ず memory バックエンドと組み合わせること
+//   - レートリミットは memory または none バックエンドと組み合わせること
 func NewSQLiteRepository(ctx context.Context, path string) (*SQLRepository, error) {
 	// file:path?_journal=WAL&_timeout=5000 で WAL モードを有効化 (読み取り並行性向上)
 	dsn := fmt.Sprintf("file:%s?_journal=WAL&_timeout=5000&_foreign_keys=on", path)
@@ -35,7 +35,7 @@ func NewSQLiteRepository(ctx context.Context, path string) (*SQLRepository, erro
 		return nil, fmt.Errorf("sqlite ping: %w", err)
 	}
 
-	repo := &SQLRepository{db: db, dialect: DialectSQLite}
+	repo := &SQLRepository{db: db}
 
 	if err := AutoMigrate(ctx, db); err != nil {
 		return nil, fmt.Errorf("sqlite migrate: %w", err)

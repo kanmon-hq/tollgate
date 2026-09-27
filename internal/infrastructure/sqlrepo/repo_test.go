@@ -175,4 +175,58 @@ func TestSQLRepository_CRUD(t *testing.T) {
 	if delCheck != nil {
 		t.Fatalf("expected nil after delete, got %+v", delCheck)
 	}
+
+	// 11. Ping
+	if err := repo.Ping(ctx); err != nil {
+		t.Fatalf("Ping failed: %v", err)
+	}
+
+	// 12. RotateKey on missing key
+	_, err = repo.RotateKey(ctx, entity.RotateKeyParams{
+		OldKeyHash: "missing",
+		NewKeyHash: "new",
+	})
+	if err == nil {
+		t.Fatalf("expected error on rotating missing key")
+	}
+
+	// 13. PutKey and GetKey with nil nullable fields
+	nilKey := &entity.APIKey{
+		PK:           "KEY#nilhash",
+		KeyID:        "key_nil",
+		Name:         "Nil Fields Key",
+		TenantID:     "tenant_2",
+		Scopes:       nil, // nil scopes
+		Status:       entity.StatusActive,
+		IsActive:     true,
+		RateLimitRPM: 100,
+		MonthlyQuota: 0,
+		CurrentMonth: "2026-09",
+		ExpiresAt:    nil,
+		Rotation:     nil,
+		LastUsedAt:   nil,
+		CreatedAt:    nowStr,
+		UpdatedAt:    nowStr,
+	}
+	if err := repo.PutKey(ctx, nilKey); err != nil {
+		t.Fatalf("PutKey with nil fields failed: %v", err)
+	}
+	gotNilKey, err := repo.GetKeyByHash(ctx, "nilhash")
+	if err != nil || gotNilKey == nil {
+		t.Fatalf("GetKeyByHash nilKey failed: %v", err)
+	}
+	if len(gotNilKey.Scopes) != 0 || gotNilKey.ExpiresAt != nil || gotNilKey.Rotation != nil {
+		t.Errorf("expected empty scopes and nil rotation/expiresAt")
+	}
+
+	// 14. UpdateKeySettings with Scopes and MonthlyQuota
+	scopes := []string{"test:scope"}
+	quota := int64(9999)
+	updatedSettings, err := repo.UpdateKeySettings(ctx, "nilhash", entity.UpdateKeyInput{
+		Scopes:       &scopes,
+		MonthlyQuota: &quota,
+	})
+	if err != nil || updatedSettings.MonthlyQuota != 9999 || len(updatedSettings.Scopes) != 1 {
+		t.Errorf("UpdateKeySettings partial update failed: %+v", updatedSettings)
+	}
 }

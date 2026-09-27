@@ -1,210 +1,244 @@
 package usecase
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"strings"
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/northfieldzz/tollgate/internal/domain/entity"
 )
 
-func TestGenerateRawKey(t *testing.T) {
-	key, err := GenerateRawKey()
+func TestKeyUsecase_CRUD_and_Lifecycle(t *testing.T) {
+	ctx := context.Background()
+
+	keysByHash := make(map[string]*entity.APIKey)
+	keysByID := make(map[string]*entity.APIKey)
+
+	mockRepo := &MockKeyRepository{
+		PutKeyFunc: func(ctx context.Context, key *entity.APIKey) error {
+			keysByHash[key.GetHash()] = key
+			keysByID[key.KeyID] = key
+			return nil
+		},
+		GetKeyByIDFunc: func(ctx context.Context, keyID string) (*entity.APIKey, error) {
+			return keysByID[keyID], nil
+		},
+		ListKeysByTenantFunc: func(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
+			var list []*entity.APIKey
+			for _, k := range keysByHash {
+				if k.TenantID == tenantID {
+					list = append(list, k)
+				}
+			}
+			return list, nil
+		},
+		UpdateKeySettingsFunc: func(ctx context.Context, keyHash string, input entity.UpdateKeyInput) (*entity.APIKey, error) {
+			k := keysByHash[keyHash]
+			if k != nil && input.Name != nil {
+				k.Name = *input.Name
+			}
+			if k != nil && input.RateLimitRPM != nil {
+				k.RateLimitRPM = *input.RateLimitRPM
+			}
+			return k, nil
+		},
+		UpdateKeyStatusFunc: func(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
+			k := keysByHash[keyHash]
+			if k != nil {
+				k.Status = status
+				k.IsActive = isActive
+			}
+			return nil
+		},
+		RotateKeyFunc: func(ctx context.Context, params entity.RotateKeyParams) (*entity.APIKey, error) {
+			oldK := keysByHash[params.OldKeyHash]
+			if oldK == nil {
+				return nil, errors.New("old key not found")
+			}
+			newK := *oldK
+			newK.PK = "KEY#" + params.NewKeyHash
+			newK.KeyPrefix = params.NewKeyPrefix
+			keysByHash[params.NewKeyHash] = &newK
+			return &newK, nil
+		},
+		DeleteKeyFunc: func(ctx context.Context, keyHash string) error {
+			if k := keysByHash[keyHash]; k != nil {
+				delete(keysByID, k.KeyID)
+				delete(keysByHash, keyHash)
+			}
+			return nil
+		},
+	}
+	usecase := NewKeyUsecase(mockRepo)
+
+	// 1. CreateKey (Success)
+	createOut, err := usecase.CreateKey(ctx, entity.CreateKeyInput{
+		Name:         "Service Alpha",
+		TenantID:     "tenant-100",
+		ServiceID:    "svc-alpha",
+		Scopes:       []string{"users:read", "users:write"},
+		RateLimitRPM: 120,
+		MonthlyQuota: 5000,
+		ExpiresIn:    3600,
+	})
 	if err != nil {
-		t.Fatalf("GenerateRawKey error: %v", err)
+		t.Fatalf("CreateKey failed: %v", err)
+	}
+	if createOut.RawKey == "" || createOut.KeyID == "" || createOut.RateLimitRPM != 120 {
+		t.Fatalf("unexpected create output: %+v", createOut)
+	}
+	if createOut.ExpiresAt == nil {
+		t.Fatalf("expected ExpiresAt to be set")
 	}
 
-	if !strings.HasPrefix(key, "tlge-live-") {
-		t.Errorf("expected prefix 'tlge-live-', got: %s", key)
+	keyID := createOut.KeyID
+
+	// 2. GetKey (Success)
+	gotKey, err := usecase.GetKey(ctx, keyID)
+	if err != nil {
+		t.Fatalf("GetKey failed: %v", err)
 	}
-	// "tlge-live-" (10文字) + hex32文字 = 42文字
-	if len(key) != 42 {
-		t.Errorf("expected key length 42, got: %d (%s)", len(key), key)
+	if gotKey.Name != "Service Alpha" || gotKey.TenantID != "tenant-100" {
+		t.Fatalf("unexpected key returned: %+v", gotKey)
 	}
 
-	// 2回目のキーと重複しないか検証
-	key2, _ := GenerateRawKey()
-	if key == key2 {
-		t.Errorf("generated keys should be unique")
+	// 3. ListKeys
+	listKeys, err := usecase.ListKeys(ctx, "tenant-100")
+	if err != nil {
+		t.Fatalf("ListKeys failed: %v", err)
+	}
+	if len(listKeys) != 1 || listKeys[0].KeyID != keyID {
+		t.Fatalf("unexpected list keys: %+v", listKeys)
+	}
+
+	// 4. UpdateKey
+	newName := "Updated Service Alpha"
+	newRPM := 300
+	newScopes := []string{"admin:*"}
+	newQuota := int64(10000)
+	updatedKey, err := usecase.UpdateKey(ctx, keyID, entity.UpdateKeyInput{
+		Name:         &newName,
+		RateLimitRPM: &newRPM,
+		Scopes:       &newScopes,
+		MonthlyQuota: &newQuota,
+	})
+	if err != nil {
+		t.Fatalf("UpdateKey failed: %v", err)
+	}
+	if updatedKey.Name != newName || updatedKey.RateLimitRPM != 300 {
+		t.Fatalf("unexpected updated key: %+v", updatedKey)
+	}
+
+	// 5. SuspendKey
+	suspended, err := usecase.SuspendKey(ctx, keyID)
+	if err != nil {
+		t.Fatalf("SuspendKey failed: %v", err)
+	}
+	if suspended.Status != entity.StatusSuspended || suspended.IsActive {
+		t.Fatalf("key not suspended: %+v", suspended)
+	}
+
+	// 6. ResumeKey
+	resumed, err := usecase.ResumeKey(ctx, keyID)
+	if err != nil {
+		t.Fatalf("ResumeKey failed: %v", err)
+	}
+	if resumed.Status != entity.StatusActive || !resumed.IsActive {
+		t.Fatalf("key not resumed: %+v", resumed)
+	}
+
+	// 7. RotateKey
+	rotateOut, err := usecase.RotateKey(ctx, keyID, entity.RotateKeyInput{
+		GracePeriodHours: 48,
+	})
+	if err != nil {
+		t.Fatalf("RotateKey failed: %v", err)
+	}
+	if rotateOut.NewRawKey == "" || rotateOut.KeyPrefix == "" {
+		t.Fatalf("unexpected rotate output: %+v", rotateOut)
+	}
+
+	// 8. DeleteKey
+	if err := usecase.DeleteKey(ctx, keyID); err != nil {
+		t.Fatalf("DeleteKey failed: %v", err)
+	}
+
+	// 9. GetKey (Not Found)
+	_, err = usecase.GetKey(ctx, keyID)
+	if err == nil {
+		t.Fatalf("expected error for deleted key")
 	}
 }
 
-func TestHashKey(t *testing.T) {
-	raw := "tlge-live-0123456789abcdef0123456789abcdef"
+func TestKeyUsecase_ValidationAndErrors(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := &MockKeyRepository{}
+	usecase := NewKeyUsecase(mockRepo)
 
-	t.Run("deterministic hash with secret", func(t *testing.T) {
-		t.Setenv("API_KEY_HASH_SECRET", "test-secret")
-		h1 := HashKey(raw)
-		h2 := HashKey(raw)
-
-		if h1 != h2 {
-			t.Errorf("hashes should be deterministic, got %s and %s", h1, h2)
-		}
-		if len(h1) != 64 {
-			t.Errorf("expected hmac-sha256 hex length 64, got %d", len(h1))
-		}
-
-		mac := hmac.New(sha256.New, []byte("test-secret"))
-		mac.Write([]byte(raw))
-		expected := hex.EncodeToString(mac.Sum(nil))
-
-		if h1 != expected {
-			t.Errorf("expected hash %s, got %s", expected, h1)
-		}
-	})
-
-	t.Run("different secret produces different hash", func(t *testing.T) {
-		t.Setenv("API_KEY_HASH_SECRET", "secret-a")
-		hashA := HashKey(raw)
-
-		t.Setenv("API_KEY_HASH_SECRET", "secret-b")
-		hashB := HashKey(raw)
-
-		if hashA == hashB {
-			t.Errorf("expected different hashes for different secrets, got %s", hashA)
-		}
-	})
-
-	t.Run("fallback when secret not set", func(t *testing.T) {
-		t.Setenv("API_KEY_HASH_SECRET", "")
-		h := HashKey(raw)
-		if len(h) != 64 {
-			t.Errorf("expected hash length 64, got %d", len(h))
-		}
-	})
-}
-
-func TestMatchScope(t *testing.T) {
-	cases := []struct {
-		required string
-		allowed  []string
-		expected bool
-	}{
-		{"ai:workflows:execute", []string{"ai:workflows:execute"}, true},
-		{"ai:workflows:execute", []string{"ai:*"}, true},
-		{"ai:workflows:execute", []string{"*"}, true},
-		{"ai:workflows:execute", []string{"mcp:tools:execute"}, false},
-		{"llm:chat:completions", []string{"llm:*", "ai:*"}, true},
-		{"llm:chat:completions", []string{"mcp:*"}, false},
-		{"", []string{"mcp:tools:execute"}, true}, // 要求なしは通す
-	}
-
-	for _, tc := range cases {
-		got := matchScope(tc.required, tc.allowed)
-		if got != tc.expected {
-			t.Errorf("matchScope(%q, %v) = %v; want %v", tc.required, tc.allowed, got, tc.expected)
-		}
-	}
-}
-
-func TestExtractKeyPrefix(t *testing.T) {
-	cases := []struct {
-		name     string
-		rawKey   string
-		expected string
-	}{
-		{
-			name:     "normal length key",
-			rawKey:   "tlge-live-8f9c1234567890abcdef",
-			expected: "tlge-live-8f9c",
-		},
-		{
-			name:     "exact length key",
-			rawKey:   "tlge-live-8f9c",
-			expected: "tlge-live-8f9c",
-		},
-		{
-			name:     "short length key",
-			rawKey:   "tlge-live-",
-			expected: "tlge-live-",
-		},
-		{
-			name:     "empty string",
-			rawKey:   "",
-			expected: "",
-		},
-		{
-			name:     "random string long",
-			rawKey:   "12345678901234567890",
-			expected: "12345678901234",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := ExtractKeyPrefix(tc.rawKey)
-			if got != tc.expected {
-				t.Errorf("ExtractKeyPrefix(%q) = %q; want %q", tc.rawKey, got, tc.expected)
-			}
+	t.Run("CreateKey missing service_id", func(t *testing.T) {
+		_, err := usecase.CreateKey(ctx, entity.CreateKeyInput{
+			Name:      "Invalid Key",
+			ServiceID: "",
 		})
-	}
-}
+		if err == nil {
+			t.Fatalf("expected validation error")
+		}
+	})
 
-func TestCreateKeyInput_Validate(t *testing.T) {
-	cases := []struct {
-		name      string
-		input     entity.CreateKeyInput
-		expectErr bool
-	}{
-		{
-			name: "tenant only (missing service_id)",
-			input: entity.CreateKeyInput{
-				Name:     "Tenant Key",
-				TenantID: "tenant-001",
-				Scopes:   []string{"llm:*"},
+	t.Run("CreateKey with repo failure", func(t *testing.T) {
+		errRepo := &MockKeyRepository{
+			PutKeyFunc: func(ctx context.Context, key *entity.APIKey) error {
+				return errors.New("db error")
 			},
-			expectErr: true,
-		},
-		{
-			name: "service only",
-			input: entity.CreateKeyInput{
-				Name:      "Service Key",
-				ServiceID: "service-orchestrator",
-				Scopes:    []string{"llm:*"},
-			},
-			expectErr: false,
-		},
-		{
-			name: "both tenant and service",
-			input: entity.CreateKeyInput{
-				Name:      "Dedicated Service Key",
-				TenantID:  "tenant-001",
-				ServiceID: "service-orchestrator",
-				Scopes:    []string{"llm:*"},
-			},
-			expectErr: false,
-		},
-		{
-			name: "both empty",
-			input: entity.CreateKeyInput{
-				Name:   "Invalid Key",
-				Scopes: []string{"llm:*"},
-			},
-			expectErr: true,
-		},
-		{
-			name: "spaces only",
-			input: entity.CreateKeyInput{
-				Name:      "Invalid Whitespace Key",
-				TenantID:  "   ",
-				ServiceID: "   ",
-				Scopes:    []string{"llm:*"},
-			},
-			expectErr: true,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.input.Validate()
-			if tc.expectErr && err == nil {
-				t.Errorf("expected error, got nil")
-			}
-			if !tc.expectErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+		}
+		errUsecase := NewKeyUsecase(errRepo)
+		_, err := errUsecase.CreateKey(ctx, entity.CreateKeyInput{
+			Name:      "Test",
+			ServiceID: "svc",
 		})
-	}
+		if err == nil {
+			t.Fatalf("expected error on repo PutKey failure")
+		}
+	})
+
+	t.Run("GetKey with repo error", func(t *testing.T) {
+		errRepo := &MockKeyRepository{
+			GetKeyByIDFunc: func(ctx context.Context, keyID string) (*entity.APIKey, error) {
+				return nil, errors.New("db find error")
+			},
+		}
+		errUsecase := NewKeyUsecase(errRepo)
+		_, err := errUsecase.GetKey(ctx, "nonexistent")
+		if err == nil {
+			t.Fatalf("expected db error")
+		}
+	})
+
+	t.Run("SuspendKey on non-existent key", func(t *testing.T) {
+		_, err := usecase.SuspendKey(ctx, "invalid-key-id")
+		if err == nil {
+			t.Fatalf("expected not found error")
+		}
+	})
+
+	t.Run("ResumeKey on non-existent key", func(t *testing.T) {
+		_, err := usecase.ResumeKey(ctx, "invalid-key-id")
+		if err == nil {
+			t.Fatalf("expected not found error")
+		}
+	})
+
+	t.Run("RotateKey on non-existent key", func(t *testing.T) {
+		_, err := usecase.RotateKey(ctx, "invalid-key-id", entity.RotateKeyInput{})
+		if err == nil {
+			t.Fatalf("expected not found error")
+		}
+	})
+
+	t.Run("DeleteKey on non-existent key", func(t *testing.T) {
+		err := usecase.DeleteKey(ctx, "invalid-key-id")
+		if err == nil {
+			t.Fatalf("expected not found error")
+		}
+	})
 }

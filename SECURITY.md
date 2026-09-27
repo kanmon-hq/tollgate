@@ -41,7 +41,7 @@ Tollgate でセキュリティ上の脆弱性や懸念を発見した場合は�
 Tollgate では以下の原則に基づき安全なデフォルト動作（Secure-by-Default / Fail-Fast）を徹底しています：
 
 1. **API キーの平文非保存**:
-   - 永続化層（DynamoDB, PostgreSQL, SQLite）には SHA-256 ハッシュダイジェストのみを保存し、平文キーは一切保持しません。
+   - 永続化層（DynamoDB, Azure Cosmos DB, Google Cloud Firestore, SQLite）には SHA-256 ハッシュダイジェストのみを保存し、平文キーは一切保持しません。
 2. **フォールバックシークレットの排除 (Fail-Fast)**:
    - マスター管理者キー（`ADMIN_API_KEY`）などの認証情報は、コード内に既知のデフォルト値をフォールバックとしてハードコードしていません。未設定時は安全のため起動時または検証時に即座に拒絶されます。
 3. **コンテキスト競合の即時遮断 (Strict Validation)**:

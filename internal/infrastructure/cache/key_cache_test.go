@@ -196,3 +196,94 @@ func TestCachedKeyRepository_PutKey_Error(t *testing.T) {
 		t.Errorf("expected old key status because cache shouldn't be invalidated")
 	}
 }
+
+type fullMockRepo struct {
+	repository.KeyRepository
+	keyByIDCalled     bool
+	listTenantCalled  bool
+	updateSettingsCalled bool
+	rotateCalled      bool
+	deleteCalled      bool
+	incMonthlyCalled  bool
+	lastUsedCalled    bool
+	pingCalled        bool
+}
+
+func (m *fullMockRepo) GetKeyByID(ctx context.Context, keyID string) (*entity.APIKey, error) {
+	m.keyByIDCalled = true
+	return &entity.APIKey{KeyID: keyID}, nil
+}
+func (m *fullMockRepo) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
+	m.listTenantCalled = true
+	return []*entity.APIKey{{TenantID: tenantID}}, nil
+}
+func (m *fullMockRepo) UpdateKeySettings(ctx context.Context, keyHash string, input entity.UpdateKeyInput) (*entity.APIKey, error) {
+	m.updateSettingsCalled = true
+	return &entity.APIKey{PK: "KEY#" + keyHash}, nil
+}
+func (m *fullMockRepo) RotateKey(ctx context.Context, params entity.RotateKeyParams) (*entity.APIKey, error) {
+	m.rotateCalled = true
+	return &entity.APIKey{PK: "KEY#" + params.NewKeyHash}, nil
+}
+func (m *fullMockRepo) DeleteKey(ctx context.Context, keyHash string) error {
+	m.deleteCalled = true
+	return nil
+}
+func (m *fullMockRepo) IncrementMonthlyUsage(ctx context.Context, keyHash, month string, delta int64) (int64, error) {
+	m.incMonthlyCalled = true
+	return delta, nil
+}
+func (m *fullMockRepo) UpdateLastUsedAt(ctx context.Context, keyHash string, t time.Time) error {
+	m.lastUsedCalled = true
+	return nil
+}
+func (m *fullMockRepo) Ping(ctx context.Context) error {
+	m.pingCalled = true
+	return nil
+}
+
+func TestCachedKeyRepository_DelegatedMethods(t *testing.T) {
+	ctx := context.Background()
+	mock := &fullMockRepo{}
+	cached := NewCachedKeyRepository(mock, 100*time.Millisecond)
+
+	_, _ = cached.GetKeyByID(ctx, "kid-1")
+	if !mock.keyByIDCalled {
+		t.Errorf("expected GetKeyByID to be delegated")
+	}
+
+	_, _ = cached.ListKeysByTenant(ctx, "t-1")
+	if !mock.listTenantCalled {
+		t.Errorf("expected ListKeysByTenant to be delegated")
+	}
+
+	_, _ = cached.UpdateKeySettings(ctx, "hash1", entity.UpdateKeyInput{})
+	if !mock.updateSettingsCalled {
+		t.Errorf("expected UpdateKeySettings to be delegated")
+	}
+
+	_, _ = cached.RotateKey(ctx, entity.RotateKeyParams{OldKeyHash: "old", NewKeyHash: "new"})
+	if !mock.rotateCalled {
+		t.Errorf("expected RotateKey to be delegated")
+	}
+
+	_ = cached.DeleteKey(ctx, "hash1")
+	if !mock.deleteCalled {
+		t.Errorf("expected DeleteKey to be delegated")
+	}
+
+	_, _ = cached.IncrementMonthlyUsage(ctx, "hash1", "2026-09", 1)
+	if !mock.incMonthlyCalled {
+		t.Errorf("expected IncrementMonthlyUsage to be delegated")
+	}
+
+	_ = cached.UpdateLastUsedAt(ctx, "hash1", time.Now())
+	if !mock.lastUsedCalled {
+		t.Errorf("expected UpdateLastUsedAt to be delegated")
+	}
+
+	_ = cached.Ping(ctx)
+	if !mock.pingCalled {
+		t.Errorf("expected Ping to be delegated")
+	}
+}

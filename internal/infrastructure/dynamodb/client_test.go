@@ -51,3 +51,14 @@ func TestAPIKey_DynamoDBMarshal_WithTenantID(t *testing.T) {
 		t.Errorf("tenant_id must be present in map when specified, but was omitted")
 	}
 }
+
+func TestNewDynamoDBRepository(t *testing.T) {
+	repo := NewDynamoDBRepository(nil, "")
+	if repo == nil {
+		t.Fatalf("expected non-nil repository")
+	}
+	dRepo, ok := repo.(*DynamoDBRepository)
+	if !ok || dRepo.tableName != "TollgateAPIKeys" {
+		t.Errorf("expected default tableName TollgateAPIKeys, got %v", dRepo.tableName)
+	}
+}

@@ -2,8 +2,8 @@
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![Huma v2](https://img.shields.io/badge/Huma-v2.39+-8A2BE2.svg)](https://huma.rocks/)
-[![DynamoDB](https://img.shields.io/badge/Storage-DynamoDB%20%7C%20PostgreSQL%20%7C%20SQLite-4053D6.svg)](https://aws.amazon.com/dynamodb/)
-[![Redis / Valkey](https://img.shields.io/badge/RateLimit-Memory%20%7C%20Redis%20%7C%20Valkey-DC382D.svg)](https://valkey.io/)
+[![DynamoDB](https://img.shields.io/badge/Storage-DynamoDB%20%7C%20CosmosDB%20%7C%20Firestore%20%7C%20SQLite-4053D6.svg)](https://aws.amazon.com/dynamodb/)
+[![Redis / Valkey](https://img.shields.io/badge/RateLimit-Memory%20%7C%20Redis%20%7C%20Valkey%20%7C%20Two--Tier-DC382D.svg)](https://valkey.io/)
 [![Prometheus](https://img.shields.io/badge/Prometheus-Metrics-E6522C.svg?logo=prometheus)](https://prometheus.io/)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6BA539.svg?logo=openapiinitiative)](https://spec.openapis.org/oas/v3.1.0)
 [![License](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
@@ -19,12 +19,15 @@
 
 - **マルチストレージ & ゼロ依存起動モード**:
   - **DynamoDB**: AWS 完全マネージド、GSI スパースインデックス対応。
-  - **PostgreSQL**: リレーショナル DB での運用（pgx 経由、コネクションプール最適化）。
+  - **Azure Cosmos DB**: Azure 完全マネージド NoSQL、Point Read (1 RU) 最適化。
+  - **Google Cloud Firestore**: GCP ネイティブ NoSQL、アトミックトランザクション対応。
   - **SQLite**: CGO 不要ピュア Go 実装。外部コンテナなし・バイナリ 1 本で即座に起動可能（開発・PoC・シングルノード用途に最適）。
 - **柔軟なレートリミットバックエンド**:
   - **In-Memory**: 超低遅延なスライディングウィンドウカウンター（SQLite モード時は自動固定）。
+  - **2段キャッシュ (Two-Tier)**: L1 ローカルインメモリ判定 ＋ L2 分散 Redis/Valkey 同期のハイブリッド階層化制御。
   - **Redis / Valkey**: 分散スケールアウト環境向けの共有スライディングウィンドウ。
-  - **DynamoDB**: AWS 完全マネージドなアトミックカウンター（※ PostgreSQL との混在は非推奨）。
+  - **DynamoDB**: AWS 完全マネージドなアトミックカウンター。
+  - **None (なし)**: レートリミットをバイパスし、月間クォータのみを制御する運用モード。
 - **動的マルチターゲット・リバースプロキシ**:
   - パスプレフィックス（`/users`, `/billing`, `/analytics` 等）に基づき、各下流サービスへ自動ルーティング。
   - ルーティング単位での Prefix Stripping、スコープ検証（`users:read`, `billing:write` 等）を自動実行。
@@ -54,21 +57,23 @@ Tollgate は、キーの永続化・月間クォータ集計・リアルタイ�
 | バックエンド | キー永続化 | 月間クォータ計数 | 分間レートリミット (RPM) | 分散スケールアウト | 外部コンテナ依存 | 推奨ユースケース |
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
 | **SQLite** (`modernc.org/sqlite`) | ✅ | ✅ (SQL Atomic) | ❌ | ❌ (単一ノード) | **なし (0個)** | **ローカル開発・PoC・単一バイナリ即起動** |
-| **PostgreSQL** (`jackc/pgx/v5`) | ✅ | ✅ (SQL Atomic) | ❌ | ✅ | あり (1個) | **汎用 RDBMS・既存 DB 共有環境** |
 | **DynamoDB** (AWS SDK v2) | ✅ | ✅ (`ADD` Atomic) | ✅ (Fixed Window) | ✅ | あり (AWS / Local) | **AWS サーバーレス・フルマネージド環境** |
+| **Azure Cosmos DB** (Azure SDK) | ✅ | ✅ (Patch/Upsert) | ❌ | ✅ | あり (Azure) | **Azure クラウド・グローバル分散環境** |
+| **Google Cloud Firestore** (GCP SDK) | ✅ | ✅ (Tx / Atomic) | ❌ | ✅ | あり (GCP / Local) | **GCP サーバーレス・フルマネージド環境** |
 | **Redis / Valkey** (`go-redis/v9`) | ❌ | ❌ | ✅ (Sliding Window) | ✅ | あり (1個) | **分散環境での高精度・低遅延レートリミット** |
+| **2段キャッシュ (Two-Tier)** | ❌ | ❌ | ✅ (L1 Memory + L2 Redis) | ✅ | あり (Redis) | **超高トラフィック・Redis 負荷最小化環境** |
 | **In-Memory** | ❌ | ❌ | ✅ (Sliding Window) | ❌ (ノードローカル) | **なし (0個)** | **SQLite 起動時・単一インスタンス環境** |
+| **None (なし)** | ❌ | ❌ | ❌ (バイパス) | ✅ | **なし (0個)** | **レートリミット無効化・クォータ専有構成** |
 
 ### 推奨バックエンド構成
 
 | 構成パターン | `DB_BACKEND` | `RATE_LIMIT_BACKEND` | キャッシュ層 | 特徴・メリット |
 |:---|:---|:---|:---:|:---|
-| **① ゼロ依存・スタンドアロン** | `sqlite` | `memory` (自動固定) | なし (ダイレクト) | **外部コンテナ一切不要**。バイナリ 1 本で即時起動。開発・テスト・エッジ用途に最適。 |
-| **② 分散 RDBMS 構成** | `postgres` | `redis` (推奨) | あり (TTL) | 堅牢な PostgreSQL 永続化 + Redis による高精度な分散レートリミット。 |
-| **③ AWS フルマネージド構成** | `dynamodb` | `dynamodb` または `redis` | あり (TTL) | インフラ運用コスト最小化。DynamoDB のみでキー管理・クォータ・RPM を完結。 |
-
-> [!NOTE]
-> `DB_BACKEND=postgres` かつ `RATE_LIMIT_BACKEND=dynamodb` の組み合わせは技術的には動作しますが、クラウド依存が混在するため**非推奨**です。PostgreSQL 採用時は `redis`（または `memory`）をご利用ください。
+| **① ゼロ依存・スタンドアロン** | `sqlite` | `memory` または `none` | なし (ダイレクト) | **外部コンテナ一切不要**。バイナリ 1 本で即時起動。開発・テスト・エッジ用途に最適。 |
+| **② AWS フルマネージド構成** | `dynamodb` | `dynamodb`, `redis`, `two-tier` | あり (TTL) | インフラ運用コスト最小化。DynamoDB のみでキー管理・クォータ・RPM を完結。 |
+| **③ Azure マネージド構成** | `cosmosdb` | `redis` または `two-tier` | あり (TTL) | Azure Cosmos DB による高速永続化 + 2段キャッシュ/Redis による高スループット制御。 |
+| **④ GCP マネージド構成** | `firestore` | `redis` または `two-tier` | あり (TTL) | Google Cloud Firestore 連携 + 分散レートリミット。 |
+| **⑤ 超高トラフィック分散構成** | `dynamodb` / `cosmosdb` / `firestore` | `two-tier` | あり (TTL) | L1 ローカルインメモリで Redis 負荷を劇的低減しつつクラスタ全体で流量制御。 |
 
 ---
 
@@ -116,7 +121,7 @@ sequenceDiagram
 | 比較項目 | **Tollgate** | **Kong Gateway (OSS)** | **Tyk Gateway (OSS)** | **Unkey** |
 |:---|:---:|:---:|:---:|:---:|
 | **ライセンス** | **MPL-2.0** | Apache 2.0 | MPL 2.0 | Apache 2.0 / BSL |
-| **最小外部依存数** | **0 個 (SQLite モード)**<br>1 個 (DynamoDB / Postgres) | 1 個〜 (PostgreSQL / DB-less) | 1 個 (Redis 必須) | 1 個〜 (MySQL 互換 DB) |
+| **最小外部依存数** | **0 個 (SQLite モード)**<br>1 個 (DynamoDB / Cosmos DB / Firestore) | 1 個〜 (PostgreSQL / DB-less) | 1 個 (Redis 必須) | 1 個〜 (MySQL 互換 DB) |
 | **単一バイナリ実行** | **✅ 完全対応** (CGO 不要) | ❌ (OpenResty/Lua 環境) | ❌ (Redis 必須) | ❌ (Docker / Node / DB 必須) |
 | **リバースプロキシ機能** | **✅ 内蔵** (動的マルチターゲット) | ✅ 内蔵 | ✅ 内蔵 | △ (検証 API / SDK 主軸) |
 | **マルチテナント認可** | **✅ ネイティブ**<br>(テナントキー / サービスキー二段構成) | △ (プラグイン設定で実現) | △ (プラグイン設定で実現) | △ (キー単位での管理) |
@@ -136,7 +141,7 @@ flowchart TD
         
         subgraph Engine ["Core Engine"]
             VERIFY["API Key Verifier<br/>(SHA-256 Hash Matching)"]
-            LIMITER["Rate Limiter<br/>(Memory / Redis / DynamoDB)"]
+            LIMITER["Rate Limiter<br/>(Memory / Redis / Two-Tier / DynamoDB / None)"]
             CACHE["Key Metadata Cache<br/>(TTL Cache)"]
             HEADER_INJECT["Context Injector<br/>(X-Tenant-ID / X-Service-ID / X-Key-ID)"]
         end
@@ -149,7 +154,7 @@ flowchart TD
     end
 
     subgraph Storage ["Storage Layer (Selectable)"]
-        DB[("Database<br/>• SQLite (Single Binary)<br/>• PostgreSQL (RDBMS)<br/>• DynamoDB (Managed)")]
+        DB[("Database<br/>• SQLite (Single Binary)<br/>• DynamoDB (AWS)<br/>• Cosmos DB (Azure)<br/>• Firestore (GCP)")]
     end
 
     subgraph Downstream ["Downstream Services (下流マイクロサービス群)"]
@@ -263,11 +268,17 @@ tollgate/
 | 変数名 | デフォルト値 | 必須 | 説明 |
 |:---|:---|:---:|:---|
 | `ADMIN_API_KEY` | *(空)* | 推奨 | 管理用 WebAPI (`/v1/admin/*`) を保護するマスターキー。未設定時は管理 API が 401 で遮断される (Fail-Fast) |
-| `DB_BACKEND` | `dynamodb` | 任意 | DB バックエンド (`dynamodb`, `sqlite`, `postgres`) |
+| `DB_BACKEND` | `dynamodb` | 任意 | DB バックエンド (`dynamodb`, `sqlite`, `cosmosdb`, `firestore`) |
 | `SQLITE_PATH` | `./tollgate.db` | 任意 | SQLite データベースファイルパス (`DB_BACKEND=sqlite` 時) |
-| `POSTGRES_DSN` | *(空)* | 任意 | PostgreSQL 接続 DSN (`DB_BACKEND=postgres` 時。`DATABASE_URL` も利用可) |
-| `RATE_LIMIT_BACKEND`| `memory` | 任意 | レートリミットバックエンド (`memory`, `redis`, `dynamodb`) |
-| `REDIS_ADDR` | `redis:6379` | 任意 | Redis / Valkey ホスト・ポート (`RATE_LIMIT_BACKEND=redis` 時) |
+| `COSMOSDB_ENDPOINT` | *(空)* | 任意 | Azure Cosmos DB エンドポイント URL (`DB_BACKEND=cosmosdb` 時) |
+| `COSMOSDB_KEY` | *(空)* | 任意 | Azure Cosmos DB プライマリ/セカンダリ キー (`DB_BACKEND=cosmosdb` 時) |
+| `COSMOSDB_DATABASE` | `tollgate` | 任意 | Azure Cosmos DB データベース名 |
+| `COSMOSDB_CONTAINER`| `api_keys` | 任意 | Azure Cosmos DB コンテナ名 |
+| `FIRESTORE_PROJECT_ID` | *(空)* | 任意 | Google Cloud プロジェクト ID (`DB_BACKEND=firestore` 時) |
+| `FIRESTORE_DATABASE_ID`| `(default)` | 任意 | Firestore データベース ID |
+| `FIRESTORE_COLLECTION` | `api_keys` | 任意 | Firestore コレクション名 |
+| `RATE_LIMIT_BACKEND`| `memory` | 任意 | レートリミットバックエンド (`memory`, `redis` / `valkey`, `two-tier`, `dynamodb`, `none`) |
+| `REDIS_ADDR` | `redis:6379` | 任意 | Redis / Valkey ホスト・ポート (`RATE_LIMIT_BACKEND=redis/valkey/two-tier` 時) |
 | `REDIS_PASSWORD` | *(空)* | 任意 | Redis / Valkey 認証パスワード |
 | `REDIS_DB` | `0` | 任意 | Redis / Valkey DB 番号 |
 | `PORT` | `8000` | 任意 | HTTP サーバーのリッスンポート |

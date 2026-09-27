@@ -32,12 +32,15 @@ Tollgate の最初のメジャーバージョンです。マルチテナント S
 
 #### 3. マルチストレージ・アーキテクチャ
 - **SQLite** (`modernc.org/sqlite`): CGO 不要な純 Go 実装。外部コンテナなし・単一バイナリで即座に起動可能。
-- **PostgreSQL** (`jackc/pgx/v5`): 汎用 RDBMS 向け高並行コネクションプール接続。
 - **Amazon DynamoDB**: AWS 完全マネージド、GSI スパースインデックス対応。
+- **Azure Cosmos DB** (`github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos`): Azure 完全マネージド NoSQL、Point Read (1 RU) 最適化。
+- **Google Cloud Firestore** (`cloud.google.com/go/firestore`): GCP ネイティブ NoSQL、アトミックトランザクション対応。
 
 #### 4. 高精度レートリミット & クォータ制御
 - **分散スライディングウィンドウ (Redis / Valkey)**: Redis Sorted Set + Lua スクリプトによるミリ秒精度のアトミック流量制御。Redis 障害時の Fail-Open（可用性優先）設計。
+- **2段キャッシュレートリミット (Two-Tier)**: L1 ローカルインメモリ判定 + L2 分散 Redis / Valkey 同期のハイブリッド階層化制御。
 - **インメモリ・スライディングウィンドウ**: 極小メモリフットプリントなノードローカル流量制限。
+- **レートリミット無効化 (None)**: レートリミットをバイパスしクォータ制御のみを行う構成に対応。
 - **月間クォータ集計**: アトミックカウンターによる月間リクエスト上限管理。
 
 #### 5. オブザーバビリティ & ドキュメント
