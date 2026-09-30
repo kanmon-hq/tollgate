@@ -27,7 +27,6 @@
   - **2段キャッシュ (Two-Tier)**: L1 ローカルインメモリ判定 ＋ L2 分散 Redis/Valkey 同期のハイブリッド階層化制御。
   - **Redis / Valkey**: 分散スケールアウト環境向けの共有スライディングウィンドウ。
   - **DynamoDB**: AWS 完全マネージドなアトミックカウンター。
-  - **None (なし)**: レートリミットをバイパスし、月間クォータのみを制御する運用モード。
 - **動的マルチターゲット・リバースプロキシ**:
   - パスプレフィックス（`/users`, `/billing`, `/analytics` 等）に基づき、各下流サービスへ自動ルーティング。
   - ルーティング単位での Prefix Stripping、スコープ検証（`users:read`, `billing:write` 等）を自動実行。
@@ -63,13 +62,12 @@ Tollgate は、キーの永続化・月間クォータ集計・リアルタイ�
 | **Redis / Valkey** (`go-redis/v9`) | ❌ | ❌ | ✅ (Sliding Window) | ✅ | あり (1個) | **分散環境での高精度・低遅延レートリミット** |
 | **2段キャッシュ (Two-Tier)** | ❌ | ❌ | ✅ (L1 Memory + L2 Redis) | ✅ | あり (Redis) | **超高トラフィック・Redis 負荷最小化環境** |
 | **In-Memory** | ❌ | ❌ | ✅ (Sliding Window) | ❌ (ノードローカル) | **なし (0個)** | **SQLite 起動時・単一インスタンス環境** |
-| **None (なし)** | ❌ | ❌ | ❌ (バイパス) | ✅ | **なし (0個)** | **レートリミット無効化・クォータ専有構成** |
 
 ### 推奨バックエンド構成
 
 | 構成パターン | `DB_BACKEND` | `RATE_LIMIT_BACKEND` | キャッシュ層 | 特徴・メリット |
 |:---|:---|:---|:---:|:---|
-| **① ゼロ依存・スタンドアロン** | `sqlite` | `memory` または `none` | なし (ダイレクト) | **外部コンテナ一切不要**。バイナリ 1 本で即時起動。開発・テスト・エッジ用途に最適。 |
+| **① ゼロ依存・スタンドアロン** | `sqlite` | `memory` | なし (ダイレクト) | **外部コンテナ一切不要**。バイナリ 1 本で即時起動。開発・テスト・エッジ用途に最適。 |
 | **② AWS フルマネージド構成** | `dynamodb` | `dynamodb`, `redis`, `two-tier` | あり (TTL) | インフラ運用コスト最小化。DynamoDB のみでキー管理・クォータ・RPM を完結。 |
 | **③ Azure マネージド構成** | `cosmosdb` | `redis` または `two-tier` | あり (TTL) | Azure Cosmos DB による高速永続化 + 2段キャッシュ/Redis による高スループット制御。 |
 | **④ GCP マネージド構成** | `firestore` | `redis` または `two-tier` | あり (TTL) | Google Cloud Firestore 連携 + 分散レートリミット。 |
@@ -277,7 +275,7 @@ tollgate/
 | `FIRESTORE_PROJECT_ID` | *(空)* | 任意 | Google Cloud プロジェクト ID (`DB_BACKEND=firestore` 時) |
 | `FIRESTORE_DATABASE_ID`| `(default)` | 任意 | Firestore データベース ID |
 | `FIRESTORE_COLLECTION` | `api_keys` | 任意 | Firestore コレクション名 |
-| `RATE_LIMIT_BACKEND`| `memory` | 任意 | レートリミットバックエンド (`memory`, `redis` / `valkey`, `two-tier`, `dynamodb`, `none`) |
+| `RATE_LIMIT_BACKEND`| `memory` | 任意 | レートリミットバックエンド (`memory`, `redis` / `valkey`, `two-tier`, `dynamodb`) |
 | `REDIS_ADDR` | `redis:6379` | 任意 | Redis / Valkey ホスト・ポート (`RATE_LIMIT_BACKEND=redis/valkey/two-tier` 時) |
 | `REDIS_PASSWORD` | *(空)* | 任意 | Redis / Valkey 認証パスワード |
 | `REDIS_DB` | `0` | 任意 | Redis / Valkey DB 番号 |

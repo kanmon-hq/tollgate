@@ -131,10 +131,6 @@ func main() {
 	// 4. レートリミッター初期化 (RATE_LIMIT_BACKEND に応じてバックエンドを切り替え)
 	var limiter repository.RateLimiter
 	switch cfg.RateLimitBackend {
-	case "none":
-		log.Printf("[tollgate] Rate limiter backend: None (Rate limiting disabled)")
-		limiter = ratelimit.NewNoopRateLimiter()
-
 	case "dynamodb":
 		if dynamoClient == nil {
 			log.Fatalf("[tollgate] DynamoDB client is not available for rate limiter")

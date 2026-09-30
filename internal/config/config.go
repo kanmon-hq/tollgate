@@ -80,7 +80,7 @@ type Config struct {
 	FirestoreDatabaseID string // default: "(default)"
 	FirestoreCollection string // default: "api_keys"
 
-	RateLimitBackend string // "memory" (default) | "redis" | "valkey" | "two-tier" | "dynamodb" | "none"
+	RateLimitBackend string // "memory" (default) | "redis" | "valkey" | "two-tier" | "dynamodb"
 
 	// Redis / Valkey 接続設定 (RATE_LIMIT_BACKEND=redis / valkey / two-tier 時)
 	RedisAddr     string // 例: "redis:6379"
@@ -133,14 +133,14 @@ func Load() (*Config, error) {
 	firestoreDatabaseID := cmp.Or(os.Getenv("FIRESTORE_DATABASE_ID"), "(default)")
 	firestoreCollection := cmp.Or(os.Getenv("FIRESTORE_COLLECTION"), "api_keys")
 
-	// レートリミットバックエンド (memory | redis | valkey | two-tier | dynamodb | none, デフォルト: memory)
+	// レートリミットバックエンド (memory | redis | valkey | two-tier | dynamodb, デフォルト: memory)
 	rateLimitBackend := strings.ToLower(cmp.Or(os.Getenv("RATE_LIMIT_BACKEND"), "memory"))
 	if rateLimitBackend == "two_tier" || rateLimitBackend == "tiered" {
 		rateLimitBackend = "two-tier"
 	}
 
-	// SQLite の場合は外部依存ゼロ・キャッシュなし・レートリミット memory / none を強制
-	if dbBackend == "sqlite" && (rateLimitBackend != "none") {
+	// SQLite の場合は外部依存ゼロ・キャッシュなし・レートリミット memory を強制
+	if dbBackend == "sqlite" {
 		rateLimitBackend = "memory"
 	}
 

@@ -109,8 +109,9 @@ func (m *fullMockKeyRepo) Ping(ctx context.Context) error {
 func TestAdminAPI_FullOperations(t *testing.T) {
 	repo := newFullMockKeyRepo()
 	keyUsecase := usecase.NewKeyUsecase(repo)
-	limiter := ratelimit.NewNoopRateLimiter()
-	verifyUsecase := usecase.NewVerifyUsecase(repo, limiter)
+	inMemLimiter := ratelimit.NewInMemoryRateLimiter(time.Minute)
+	defer inMemLimiter.Stop()
+	verifyUsecase := usecase.NewVerifyUsecase(repo, inMemLimiter)
 
 	adminKey := "test-secret-123"
 	cfg := &config.Config{

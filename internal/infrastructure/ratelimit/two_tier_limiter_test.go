@@ -7,22 +7,6 @@ import (
 	"time"
 )
 
-func TestNoopRateLimiter(t *testing.T) {
-	limiter := NewNoopRateLimiter()
-	allowed, remaining, resetIn, err := limiter.Allow(context.Background(), "test-key", 60)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if !allowed {
-		t.Fatalf("expected allowed=true, got false")
-	}
-	if remaining != 60 {
-		t.Fatalf("expected remaining=60, got %d", remaining)
-	}
-	if resetIn != 0 {
-		t.Fatalf("expected resetIn=0, got %v", resetIn)
-	}
-}
 
 type mockRateLimiter struct {
 	allowFunc func(ctx context.Context, id string, limitRPM int) (bool, int, time.Duration, error)

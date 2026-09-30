@@ -112,7 +112,7 @@ func TestLoad_FirestoreAndRoutesFile(t *testing.T) {
 
 	os.Setenv("DB_BACKEND", "firestore")
 	os.Setenv("FIRESTORE_PROJECT_ID", "my-project")
-	os.Setenv("RATE_LIMIT_BACKEND", "none")
+	os.Setenv("RATE_LIMIT_BACKEND", "memory")
 	os.Setenv("ROUTES_CONFIG_FILE", routeFile)
 	os.Setenv("KEY_CACHE_TTL", "0")
 
@@ -132,8 +132,8 @@ func TestLoad_FirestoreAndRoutesFile(t *testing.T) {
 	if cfg.DBBackend != "firestore" || cfg.FirestoreProjectID != "my-project" {
 		t.Errorf("unexpected firestore config: %+v", cfg)
 	}
-	if cfg.RateLimitBackend != "none" {
-		t.Errorf("expected RateLimitBackend=none, got %s", cfg.RateLimitBackend)
+	if cfg.RateLimitBackend != "memory" {
+		t.Errorf("expected RateLimitBackend=memory, got %s", cfg.RateLimitBackend)
 	}
 	if cfg.KeyCacheTTL != 0 {
 		t.Errorf("expected KeyCacheTTL=0, got %v", cfg.KeyCacheTTL)
