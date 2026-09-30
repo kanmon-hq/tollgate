@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/config"
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
-	"github.com/northfieldzz/tollgate/internal/infrastructure/ratelimit"
-	"github.com/northfieldzz/tollgate/internal/usecase"
+	"github.com/kanmon-hq/tollgate/internal/config"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/infrastructure/ratelimit"
+	"github.com/kanmon-hq/tollgate/internal/usecase"
 )
 
 type fullMockKeyRepo struct {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 )
 
 // TwoTierRateLimiter は L1 (プロセス内 In-Memory) と L2 (分散 Redis / Valkey) を組み合わせた

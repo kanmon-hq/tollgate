@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
-	"github.com/northfieldzz/tollgate/internal/infrastructure/sqlrepo"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/infrastructure/sqlrepo"
 )
 
 func setupTestSQLite(t *testing.T) *sqlrepo.SQLRepository {

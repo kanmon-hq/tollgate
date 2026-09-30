@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
 )
 
 func TestAPIKey_DynamoDBMarshal_EmptyTenantID(t *testing.T) {

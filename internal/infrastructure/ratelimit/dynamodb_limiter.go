@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 )
 
 // DynamoDBRateLimiter は Fixed Window アルゴリズムで DynamoDB をバックエンドとするレートリミッター。

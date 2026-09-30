@@ -8,9 +8,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
-	"github.com/northfieldzz/tollgate/internal/config"
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
-	"github.com/northfieldzz/tollgate/internal/usecase"
+	"github.com/kanmon-hq/tollgate/internal/config"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/usecase"
 )
 
 func NewRouter(cfg *config.Config, keyUsecase *usecase.KeyUsecase, verifyUsecase *usecase.VerifyUsecase, repo repository.KeyRepository, proxyHandler http.Handler) http.Handler {

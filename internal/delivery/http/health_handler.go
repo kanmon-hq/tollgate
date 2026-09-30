@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 )
 
 type HealthOutput struct {

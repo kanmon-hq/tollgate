@@ -1,4 +1,4 @@
-module github.com/northfieldzz/tollgate
+module github.com/kanmon-hq/tollgate
 
 go 1.27.1
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 )
 
 type mockRepo struct {

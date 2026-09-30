@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

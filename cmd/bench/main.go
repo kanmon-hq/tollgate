@@ -14,12 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/config"
-	deliveryHttp "github.com/northfieldzz/tollgate/internal/delivery/http"
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
-	"github.com/northfieldzz/tollgate/internal/infrastructure/ratelimit"
-	"github.com/northfieldzz/tollgate/internal/infrastructure/sqlrepo"
-	"github.com/northfieldzz/tollgate/internal/usecase"
+	"github.com/kanmon-hq/tollgate/internal/config"
+	deliveryHttp "github.com/kanmon-hq/tollgate/internal/delivery/http"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/infrastructure/ratelimit"
+	"github.com/kanmon-hq/tollgate/internal/infrastructure/sqlrepo"
+	"github.com/kanmon-hq/tollgate/internal/usecase"
 )
 
 func main() {

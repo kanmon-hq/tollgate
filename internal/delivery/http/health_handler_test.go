@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
 )
 
 type mockHealthRepo struct {

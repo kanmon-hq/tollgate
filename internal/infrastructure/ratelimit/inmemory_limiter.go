@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 )
 
 // InMemoryRateLimiter は SlidingWindowLimiter を repository.RateLimiter に適合させるアダプタ。

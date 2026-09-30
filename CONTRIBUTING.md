@@ -28,7 +28,7 @@ Tollgate への貢献をご検討いただきありがとうございます！
 ## 開発ワークフロー
 
 ### 1. Issue の作成
-- バグの報告や新機能の提案を行う場合は、まず [GitHub Issues](https://github.com/northfieldzz/tollgate/issues) を作成してください。
+- バグの報告や新機能の提案を行う場合は、まず [GitHub Issues](https://github.com/kanmon-hq/tollgate/issues) を作成してください。
 - 既存の Issue や PR で類似の議論がないか事前に確認してください。
 
 ### 2. ブランチ戦略
@@ -70,7 +70,7 @@ git checkout -b feature/dynamic-route-reload
 
 ```bash
 # 1. リポジトリのクローン
-git clone https://github.com/northfieldzz/tollgate.git
+git clone https://github.com/kanmon-hq/tollgate.git
 cd tollgate
 
 # 2. 依存関係のダウンロード

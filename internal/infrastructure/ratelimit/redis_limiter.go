@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/domain/repository"
+	"github.com/kanmon-hq/tollgate/internal/domain/repository"
 	"github.com/redis/go-redis/v9"
 )
 

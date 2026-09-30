@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/northfieldzz/tollgate/internal/config"
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
-	"github.com/northfieldzz/tollgate/internal/usecase"
+	"github.com/kanmon-hq/tollgate/internal/config"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/usecase"
 )
 
 // RouteConfig は動的ルーティングのルール定義 (config.RouteConfig のエイリアス)

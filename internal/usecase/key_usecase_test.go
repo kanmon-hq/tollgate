@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/northfieldzz/tollgate/internal/domain/entity"
+	"github.com/kanmon-hq/tollgate/internal/domain/entity"
 )
 
 func TestKeyUsecase_CRUD_and_Lifecycle(t *testing.T) {
