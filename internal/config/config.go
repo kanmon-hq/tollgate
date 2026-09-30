@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // loadDotEnv は .env ファイルを読み込み、未セットの環境変数にのみ適用する。
@@ -83,6 +85,7 @@ type Config struct {
 	RateLimitBackend string // "memory" (default) | "redis" | "valkey" | "two-tier" | "dynamodb"
 
 	// Redis / Valkey 接続設定 (RATE_LIMIT_BACKEND=redis / valkey / two-tier 時)
+	RedisURL      string // 例: "redis://localhost:6379/0" (VALKEY_URL または REDIS_URL)
 	RedisAddr     string // 例: "redis:6379"
 	RedisPassword string // 認証パスワード (不要な場合は空文字)
 	RedisDB       int    // 使用する DB 番号 (0-15, デフォルト: 0)
@@ -95,7 +98,7 @@ func Load() (*Config, error) {
 	port := cmp.Or(os.Getenv("PORT"), "8000")
 	endpoint := os.Getenv("DYNAMODB_ENDPOINT")
 	region := cmp.Or(os.Getenv("AWS_REGION"), "ap-northeast-1")
-	tableName := cmp.Or(os.Getenv("TABLE_NAME"), "TollgateAPIKeys")
+	tableName := cmp.Or(os.Getenv("DYNAMODB_TABLE_NAME"), "TollgateAPIKeys")
 	adminAPIKey := os.Getenv("ADMIN_API_KEY")
 
 	// OpenAPI & Docs パス正規化 (空文字でなければ先頭スラッシュ補完)
@@ -121,7 +124,7 @@ func Load() (*Config, error) {
 	}
 
 	// DB バックエンド (dynamodb | sqlite | cosmosdb | firestore, デフォルト: dynamodb)
-	dbBackend := strings.ToLower(cmp.Or(os.Getenv("DB_BACKEND"), "dynamodb"))
+	dbBackend := strings.ToLower(cmp.Or(os.Getenv("STORAGE_BACKEND"), "dynamodb"))
 	sqlitePath := cmp.Or(os.Getenv("SQLITE_PATH"), "./tollgate.db")
 
 	cosmosEndpoint := os.Getenv("COSMOSDB_ENDPOINT")
@@ -144,7 +147,8 @@ func Load() (*Config, error) {
 		rateLimitBackend = "memory"
 	}
 
-	// Redis 接続設定
+	// Redis / Valkey 接続設定
+	redisURL := cmp.Or(os.Getenv("VALKEY_URL"), os.Getenv("REDIS_URL"))
 	redisAddr := cmp.Or(os.Getenv("REDIS_ADDR"), "redis:6379")
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	redisDB := 0
@@ -152,6 +156,15 @@ func Load() (*Config, error) {
 		if db, err := strconv.Atoi(dbStr); err == nil {
 			redisDB = db
 		}
+	}
+	if redisURL != "" {
+		opts, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid VALKEY_URL / REDIS_URL: %w", err)
+		}
+		redisAddr = opts.Addr
+		redisPassword = opts.Password
+		redisDB = opts.DB
 	}
 
 	return &Config{
@@ -175,6 +188,7 @@ func Load() (*Config, error) {
 		FirestoreDatabaseID: firestoreDatabaseID,
 		FirestoreCollection: firestoreCollection,
 		RateLimitBackend:    rateLimitBackend,
+		RedisURL:            redisURL,
 		RedisAddr:           redisAddr,
 		RedisPassword:       redisPassword,
 		RedisDB:             redisDB,

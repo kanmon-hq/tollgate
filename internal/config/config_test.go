@@ -50,7 +50,7 @@ func TestLoad_DefaultAndPath(t *testing.T) {
 
 func TestLoad_CustomConfigurations(t *testing.T) {
 	os.Setenv("PORT", "9000")
-	os.Setenv("DB_BACKEND", "cosmosdb")
+	os.Setenv("STORAGE_BACKEND", "cosmosdb")
 	os.Setenv("COSMOSDB_ENDPOINT", "https://test.documents.azure.com:443/")
 	os.Setenv("COSMOSDB_KEY", "primary-key")
 	os.Setenv("COSMOSDB_DATABASE", "custom_db")
@@ -64,7 +64,7 @@ func TestLoad_CustomConfigurations(t *testing.T) {
 
 	defer func() {
 		os.Unsetenv("PORT")
-		os.Unsetenv("DB_BACKEND")
+		os.Unsetenv("STORAGE_BACKEND")
 		os.Unsetenv("COSMOSDB_ENDPOINT")
 		os.Unsetenv("COSMOSDB_KEY")
 		os.Unsetenv("COSMOSDB_DATABASE")
@@ -110,14 +110,14 @@ func TestLoad_FirestoreAndRoutesFile(t *testing.T) {
 	routeFile := filepath.Join(tmpDir, "routes.json")
 	_ = os.WriteFile(routeFile, []byte(`[{"prefix":"/file-route","target":"http://file-svc:80"}]`), 0644)
 
-	os.Setenv("DB_BACKEND", "firestore")
+	os.Setenv("STORAGE_BACKEND", "firestore")
 	os.Setenv("FIRESTORE_PROJECT_ID", "my-project")
 	os.Setenv("RATE_LIMIT_BACKEND", "memory")
 	os.Setenv("ROUTES_CONFIG_FILE", routeFile)
 	os.Setenv("KEY_CACHE_TTL", "0")
 
 	defer func() {
-		os.Unsetenv("DB_BACKEND")
+		os.Unsetenv("STORAGE_BACKEND")
 		os.Unsetenv("FIRESTORE_PROJECT_ID")
 		os.Unsetenv("RATE_LIMIT_BACKEND")
 		os.Unsetenv("ROUTES_CONFIG_FILE")
@@ -140,6 +140,33 @@ func TestLoad_FirestoreAndRoutesFile(t *testing.T) {
 	}
 	if len(cfg.Routes) != 1 || cfg.Routes[0].Prefix != "/file-route" {
 		t.Errorf("expected routes from file, got %+v", cfg.Routes)
+	}
+}
+
+func TestLoad_DynamoDBTableNameAndValkeyURL(t *testing.T) {
+	os.Setenv("DYNAMODB_TABLE_NAME", "CustomKeysTable")
+	os.Setenv("VALKEY_URL", "redis://:secretpass@127.0.0.1:6390/3")
+	defer func() {
+		os.Unsetenv("DYNAMODB_TABLE_NAME")
+		os.Unsetenv("VALKEY_URL")
+	}()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.TableName != "CustomKeysTable" {
+		t.Errorf("expected TableName=CustomKeysTable, got %s", cfg.TableName)
+	}
+	if cfg.RedisAddr != "127.0.0.1:6390" {
+		t.Errorf("expected RedisAddr=127.0.0.1:6390, got %s", cfg.RedisAddr)
+	}
+	if cfg.RedisPassword != "secretpass" {
+		t.Errorf("expected RedisPassword=secretpass, got %s", cfg.RedisPassword)
+	}
+	if cfg.RedisDB != 3 {
+		t.Errorf("expected RedisDB=3, got %d", cfg.RedisDB)
 	}
 }
 

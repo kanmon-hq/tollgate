@@ -29,7 +29,7 @@ COPY --from=builder /app/tollgate /app/tollgate
 ENV PORT=8000
 ENV DYNAMODB_ENDPOINT=http://dynamodb:8000
 ENV AWS_REGION=ap-northeast-1
-ENV TABLE_NAME=TollgateAPIKeys
+ENV DYNAMODB_TABLE_NAME=TollgateAPIKeys
 
 EXPOSE 8000
 
