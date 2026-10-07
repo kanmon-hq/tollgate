@@ -10,8 +10,8 @@ cloud.google.com/go/firestore v1.26.0 h1:7Y6wn4aj5JXl2DAsKSTpLzYKPrfrIbhgQnHDjNO
 cloud.google.com/go/firestore v1.26.0/go.mod h1:X7hAjktdf9wIYJEHJ/dRFpYJmpcZanf1WnWxBAq8vJE=
 cloud.google.com/go/longrunning v1.2.0 h1:WjYH3YHBGCxGJP9M4dWGHBfXr/cFIjMkNgWcJj7/iMM=
 cloud.google.com/go/longrunning v1.2.0/go.mod h1:5KMQALFGOCtFoi2xSOA1u3H7WKlhmckgiyFw7+LGQp0=
-github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1 h1:zvXfGJCWvywnCA814d8ZiVyt+fm9nnTE8xSb99zRyfo=
-github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1/go.mod h1:iptorS+VYKFL2N6PnebpS91dubG35eAOEERnT4PJbQU=
+github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2 h1:utpeoEeZjd+A8J41zvoLsOOrqXHhX1Kx/X/tCW9dEYQ=
+github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2/go.mod h1:iptorS+VYKFL2N6PnebpS91dubG35eAOEERnT4PJbQU=
 github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1 h1:Hk5QBxZQC1jb2Fwj6mpzme37xbCDdNTxU7O9eb5+LB4=
 github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1/go.mod h1:IYus9qsFobWIc2YVwe/WPjcnyCkPKtnHAqUYeebc8z0=
 github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos v1.5.0 h1:wtCn7MemMD9eo4/NdpJ6S/MFD2BV2CDwoEfvl5th2vM=
