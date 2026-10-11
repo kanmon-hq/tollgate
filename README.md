@@ -298,33 +298,45 @@ tollgate/
 - Docker / nerdctl & Docker Compose
 - （ローカル実行時）Go 1.24+
 
-### 1. Docker Compose での一括起動 (推奨)
+### 1. Docker Compose での起動 (プロファイル制御)
 
-DynamoDB Local、初期テーブル作成、DynamoDB Admin、および Tollgate をワンコマンドで起動する。
+必要なバックエンドエンジンのみを `--profile` で指定して起動する（不要なコンテナは起動しない）。
 
+#### パターン A: DynamoDB Local + インメモリレートリミット
 ```bash
 # 1. 環境変数の準備
 cp .env.example .env
 
-# 2. コンテナ起動 (DynamoDB + Admin + Tollgate)
-nerdctl compose --profile database up -d --build
+# 2. DynamoDB のみ起動 (Admin UI や Redis 等は立ち上がらない)
+nerdctl compose --profile dynamodb up -d --build
 
 # 3. ログ確認
-nerdctl compose --profile database logs -f tollgate
+nerdctl compose logs -f tollgate
 
-# 4. ヘルスチェック確認
-curl -i http://localhost:8002/livez
-curl -i http://localhost:8002/readyz
+# 4. ヘルスチェック確認 (8080 ポート)
+curl -i http://localhost:8080/livez
+curl -i http://localhost:8080/readyz
 ```
 
-- **Tollgate ゲートウェイ**: `http://localhost:8080`
-- **Scalar ドキュメント**: `http://localhost:8080/docs`
+#### パターン B: DynamoDB + Valkey (または Redis) レートリミット
+```bash
+RATE_LIMIT_BACKEND=valkey nerdctl compose --profile dynamodb --profile valkey up -d --build
+```
+
+#### パターン C: DynamoDB Admin UI も合わせて起動する場合
+```bash
+nerdctl compose --profile dynamodb --profile dynamodb-admin up -d
+```
 - **DynamoDB Admin UI**: `http://localhost:8001`
 
-#### Prometheus & Grafana メトリクス監視付きで起動する場合
+#### パターン D: SQLite + インメモリ (外部 DB/キャッシュ コンテナ一切不要・最軽量)
 ```bash
-# database + monitor プロファイルを指定して起動
-docker compose --profile database --profile monitor up -d
+STORAGE_BACKEND=sqlite nerdctl compose up -d --build
+```
+
+#### パターン E: Prometheus & Grafana メトリクス監視付きで起動する場合
+```bash
+nerdctl compose --profile dynamodb --profile monitor up -d
 ```
 - **Grafana ダッシュボード**: `http://localhost:3000` (ログイン不要・Tollgate Overview ダッシュボード自動読み込み)
 - **Prometheus Web UI**: `http://localhost:9090`

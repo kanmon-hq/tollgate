@@ -124,7 +124,7 @@ func Load() (*Config, error) {
 	}
 
 	// DB バックエンド (dynamodb | sqlite | cosmosdb | firestore, デフォルト: dynamodb)
-	dbBackend := strings.ToLower(cmp.Or(os.Getenv("STORAGE_BACKEND"), "dynamodb"))
+	dbBackend := strings.ToLower(cmp.Or(os.Getenv("STORAGE_BACKEND"), os.Getenv("DB_BACKEND"), "dynamodb"))
 	sqlitePath := cmp.Or(os.Getenv("SQLITE_PATH"), "./tollgate.db")
 
 	cosmosEndpoint := os.Getenv("COSMOSDB_ENDPOINT")
