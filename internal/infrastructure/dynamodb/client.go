@@ -3,7 +3,10 @@ package dynamodb
 import (
 	"cmp"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +32,9 @@ func NewDynamoDBRepository(client *dynamodb.Client, tableName string) repository
 }
 
 func (r *DynamoDBRepository) PutKey(ctx context.Context, key *entity.APIKey) error {
+	if key.ItemType == "" {
+		key.ItemType = "KEY"
+	}
 	item, err := attributevalue.MarshalMap(key)
 	if err != nil {
 		return fmt.Errorf("marshal key error: %w", err)
@@ -95,25 +101,126 @@ func (r *DynamoDBRepository) GetKeyByID(ctx context.Context, keyID string) (*ent
 	return nil, nil
 }
 
-func (r *DynamoDBRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
-	out, err := r.client.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(r.tableName),
-		IndexName:              aws.String("GSI_TenantKeys"),
-		KeyConditionExpression: aws.String("tenant_id = :tid"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":tid": &types.AttributeValueMemberS{Value: tenantID},
-		},
-		ScanIndexForward: aws.Bool(false), // 新しい順
-	})
+func encodeCursor(key map[string]types.AttributeValue) (string, error) {
+	if len(key) == 0 {
+		return "", nil
+	}
+	var rawMap map[string]interface{}
+	if err := attributevalue.UnmarshalMap(key, &rawMap); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(rawMap)
 	if err != nil {
-		return nil, fmt.Errorf("query tenant keys error: %w", err)
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+func decodeCursor(cursor string) (map[string]types.AttributeValue, error) {
+	if strings.TrimSpace(cursor) == "" {
+		return nil, nil
+	}
+	b, err := base64.URLEncoding.DecodeString(cursor)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cursor encoding: %w", err)
+	}
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(b, &rawMap); err != nil {
+		return nil, fmt.Errorf("invalid cursor json: %w", err)
+	}
+	av, err := attributevalue.MarshalMap(rawMap)
+	if err != nil {
+		return nil, fmt.Errorf("marshal cursor map: %w", err)
+	}
+	return av, nil
+}
+
+func (r *DynamoDBRepository) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 200 {
+		limit = 200
+	}
+
+	startKey, err := decodeCursor(params.Cursor)
+	if err != nil {
+		return nil, fmt.Errorf("decode cursor error: %w", err)
+	}
+
+	var input *dynamodb.QueryInput
+	if params.TenantID != "" {
+		input = &dynamodb.QueryInput{
+			TableName:              aws.String(r.tableName),
+			IndexName:              aws.String("GSI_TenantKeys"),
+			KeyConditionExpression: aws.String("tenant_id = :tid"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":tid": &types.AttributeValueMemberS{Value: params.TenantID},
+			},
+			ScanIndexForward:  aws.Bool(false), // 新しい順
+			Limit:             aws.Int32(int32(limit)),
+			ExclusiveStartKey: startKey,
+		}
+		if params.ServiceID != "" {
+			input.FilterExpression = aws.String("service_id = :sid")
+			input.ExpressionAttributeValues[":sid"] = &types.AttributeValueMemberS{Value: params.ServiceID}
+		}
+	} else if params.ServiceID != "" {
+		input = &dynamodb.QueryInput{
+			TableName:              aws.String(r.tableName),
+			IndexName:              aws.String("GSI_ServiceKeys"),
+			KeyConditionExpression: aws.String("service_id = :sid"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":sid": &types.AttributeValueMemberS{Value: params.ServiceID},
+			},
+			ScanIndexForward:  aws.Bool(false), // 新しい順
+			Limit:             aws.Int32(int32(limit)),
+			ExclusiveStartKey: startKey,
+		}
+	} else {
+		input = &dynamodb.QueryInput{
+			TableName:              aws.String(r.tableName),
+			IndexName:              aws.String("GSI_AllKeys"),
+			KeyConditionExpression: aws.String("item_type = :itype"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":itype": &types.AttributeValueMemberS{Value: "KEY"},
+			},
+			ScanIndexForward:  aws.Bool(false), // 新しい順
+			Limit:             aws.Int32(int32(limit)),
+			ExclusiveStartKey: startKey,
+		}
+	}
+
+	out, err := r.client.Query(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("query keys error: %w", err)
 	}
 
 	var keys []*entity.APIKey
 	if err := attributevalue.UnmarshalListOfMaps(out.Items, &keys); err != nil {
-		return nil, fmt.Errorf("unmarshal tenant keys error: %w", err)
+		return nil, fmt.Errorf("unmarshal keys error: %w", err)
 	}
-	return keys, nil
+	if keys == nil {
+		keys = []*entity.APIKey{}
+	}
+
+	nextCursor, err := encodeCursor(out.LastEvaluatedKey)
+	if err != nil {
+		return nil, fmt.Errorf("encode cursor error: %w", err)
+	}
+
+	return &entity.ListKeysResult{
+		Keys:       keys,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+func (r *DynamoDBRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
+	res, err := r.ListKeys(ctx, entity.ListKeysParams{TenantID: tenantID, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	return res.Keys, nil
 }
 
 func (r *DynamoDBRepository) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
@@ -319,4 +426,112 @@ func (r *DynamoDBRepository) Ping(ctx context.Context) error {
 		return fmt.Errorf("dynamodb ping failed: %w", err)
 	}
 	return nil
+}
+
+func (r *DynamoDBRepository) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	stats := &entity.KeyStats{
+		Services: make([]string, 0),
+		Tenants:  make([]string, 0),
+	}
+	var queryInput *dynamodb.QueryInput
+
+	if tenantID != "" {
+		queryInput = &dynamodb.QueryInput{
+			TableName:              aws.String(r.tableName),
+			IndexName:              aws.String("GSI_TenantKeys"),
+			KeyConditionExpression: aws.String("tenant_id = :tid"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":tid": &types.AttributeValueMemberS{Value: tenantID},
+			},
+			ProjectionExpression: aws.String("#st, current_month_usage, service_id, tenant_id"),
+			ExpressionAttributeNames: map[string]string{
+				"#st": "status",
+			},
+		}
+		if serviceID != "" {
+			queryInput.FilterExpression = aws.String("service_id = :sid")
+			queryInput.ExpressionAttributeValues[":sid"] = &types.AttributeValueMemberS{Value: serviceID}
+		}
+	} else if serviceID != "" {
+		queryInput = &dynamodb.QueryInput{
+			TableName:              aws.String(r.tableName),
+			IndexName:              aws.String("GSI_ServiceKeys"),
+			KeyConditionExpression: aws.String("service_id = :sid"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":sid": &types.AttributeValueMemberS{Value: serviceID},
+			},
+			ProjectionExpression: aws.String("#st, current_month_usage, service_id, tenant_id"),
+			ExpressionAttributeNames: map[string]string{
+				"#st": "status",
+			},
+		}
+	} else {
+		queryInput = &dynamodb.QueryInput{
+			TableName:              aws.String(r.tableName),
+			IndexName:              aws.String("GSI_AllKeys"),
+			KeyConditionExpression: aws.String("item_type = :itype"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":itype": &types.AttributeValueMemberS{Value: "KEY"},
+			},
+			ProjectionExpression: aws.String("#st, current_month_usage, service_id, tenant_id"),
+			ExpressionAttributeNames: map[string]string{
+				"#st": "status",
+			},
+		}
+	}
+
+	servicesSet := make(map[string]struct{})
+	tenantsSet := make(map[string]struct{})
+
+	for {
+		out, err := r.client.Query(ctx, queryInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query stats from dynamodb: %w", err)
+		}
+
+		for _, item := range out.Items {
+			stats.TotalKeys++
+
+			if stVal, ok := item["status"].(*types.AttributeValueMemberS); ok {
+				switch entity.KeyStatus(stVal.Value) {
+				case entity.StatusActive:
+					stats.ActiveKeys++
+				case entity.StatusRotating:
+					stats.RotatingKeys++
+				}
+			}
+
+			if usageVal, ok := item["current_month_usage"].(*types.AttributeValueMemberN); ok {
+				var u int64
+				if _, err := fmt.Sscanf(usageVal.Value, "%d", &u); err == nil {
+					stats.TotalMonthlyUsage += u
+				}
+			}
+
+			if svcVal, ok := item["service_id"].(*types.AttributeValueMemberS); ok && svcVal.Value != "" {
+				servicesSet[svcVal.Value] = struct{}{}
+			}
+
+			if tenVal, ok := item["tenant_id"].(*types.AttributeValueMemberS); ok && tenVal.Value != "" {
+				tenantsSet[tenVal.Value] = struct{}{}
+			}
+		}
+
+		if out.LastEvaluatedKey == nil {
+			break
+		}
+		queryInput.ExclusiveStartKey = out.LastEvaluatedKey
+	}
+
+	for s := range servicesSet {
+		stats.Services = append(stats.Services, s)
+	}
+	slices.Sort(stats.Services)
+
+	for t := range tenantsSet {
+		stats.Tenants = append(stats.Tenants, t)
+	}
+	slices.Sort(stats.Tenants)
+
+	return stats, nil
 }

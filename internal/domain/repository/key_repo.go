@@ -21,6 +21,9 @@ type KeyRepository interface {
 	// ListKeysByTenant は GSI (GSI_TenantKeys) を使用して指定テナントのキー一覧を取得する
 	ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error)
 
+	// ListKeys はページネーションに対応したキー一覧を取得する (tenantID 省略時は全件対象)
+	ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error)
+
 	// UpdateKeyStatus はキーのステータスおよび有効フラグを更新する (suspend / resume / revoke)
 	UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error
 
@@ -41,4 +44,7 @@ type KeyRepository interface {
 
 	// Ping は DynamoDB への疎通確認を行う
 	Ping(ctx context.Context) error
+
+	// GetStats は指定テナント・サービス (空文字の場合は全件) の統計サマリーを取得する
+	GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error)
 }

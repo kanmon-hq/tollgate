@@ -29,6 +29,9 @@ func (m *mockKeyRepo) GetKeyByID(ctx context.Context, keyID string) (*entity.API
 func (m *mockKeyRepo) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
 	return nil, nil
 }
+func (m *mockKeyRepo) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	return &entity.ListKeysResult{Keys: []*entity.APIKey{}}, nil
+}
 func (m *mockKeyRepo) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
 	return nil
 }
@@ -46,6 +49,9 @@ func (m *mockKeyRepo) UpdateLastUsedAt(ctx context.Context, keyHash string, last
 	return nil
 }
 func (m *mockKeyRepo) Ping(ctx context.Context) error { return nil }
+func (m *mockKeyRepo) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	return &entity.KeyStats{}, nil
+}
 
 func setupTestMultiProxy(t *testing.T, routes []*RouteConfig, defaultBackend http.HandlerFunc) (*MultiTargetProxy, *mockKeyRepo) {
 	repo := &mockKeyRepo{keys: make(map[string]*entity.APIKey)}

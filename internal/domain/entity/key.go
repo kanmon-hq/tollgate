@@ -47,6 +47,7 @@ type APIKey struct {
 	LastUsedAt        *time.Time    `dynamodbav:"last_used_at,omitempty" json:"last_used_at,omitempty"` // 最終利用日時
 	Rotation          *RotationMeta `dynamodbav:"rotation_meta,omitempty" json:"rotation_meta,omitempty"`
 	ExpiresAt         *int64        `dynamodbav:"expires_at,omitempty" json:"expires_at,omitempty"` // Unix 秒 (TTL)
+	ItemType          string        `dynamodbav:"item_type,omitempty" json:"-"`                     // GSI_AllKeys Partition Key ("KEY")
 	CreatedAt         string        `dynamodbav:"created_at" json:"created_at"`                     // ISO 8601 (GSI Sort Key)
 	UpdatedAt         string        `dynamodbav:"updated_at" json:"updated_at"`                     // ISO 8601
 }
@@ -132,4 +133,28 @@ type VerifyKeyOutput struct {
 	RemainingQuota int64    `json:"remaining_quota" doc:"当月の残り可能リクエスト数 (-1: 無制限)"`
 	LimitRPM       int      `json:"limit_rpm"`
 	MonthlyQuota   int64    `json:"monthly_quota"`
+}
+
+// ListKeysParams は API キー一覧取得のパラメータ (ページネーション対応)
+type ListKeysParams struct {
+	TenantID  string `json:"tenant_id,omitempty"`
+	ServiceID string `json:"service_id,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	Cursor    string `json:"cursor,omitempty"`
+}
+
+// ListKeysResult は API キー一覧取得の結果
+type ListKeysResult struct {
+	Keys       []*APIKey `json:"keys"`
+	NextCursor string    `json:"next_cursor,omitempty"`
+}
+
+// KeyStats は API キーおよび利用量の統計サマリー
+type KeyStats struct {
+	TotalKeys         int64    `json:"total_keys" doc:"登録済みキー総数"`
+	ActiveKeys        int64    `json:"active_keys" doc:"有効稼働中キー数"`
+	TotalMonthlyUsage int64    `json:"total_monthly_usage" doc:"当月リクエスト総利用 (全キー累計)"`
+	RotatingKeys      int64    `json:"rotating_keys" doc:"ローテーション移行中キー数"`
+	Services          []string `json:"services,omitempty" doc:"登録済みサービスID一覧"`
+	Tenants           []string `json:"tenants,omitempty" doc:"登録済みテナントID一覧"`
 }

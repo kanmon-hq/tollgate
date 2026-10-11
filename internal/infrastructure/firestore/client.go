@@ -171,9 +171,29 @@ func (r *FirestoreRepository) GetKeyByID(ctx context.Context, keyID string) (*en
 	return fromDoc(&doc), nil
 }
 
-// ListKeysByTenant は指定テナントのキー一覧を取得する。
-func (r *FirestoreRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
-	iter := r.client.Collection(r.collection).Where("tenant_id", "==", tenantID).OrderBy("created_at", firestore.Desc).Documents(ctx)
+// ListKeys はページネーションに対応したキー一覧を取得する。
+func (r *FirestoreRepository) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 200 {
+		limit = 200
+	}
+
+	q := r.client.Collection(r.collection).Query
+	if params.TenantID != "" {
+		q = q.Where("tenant_id", "==", params.TenantID)
+	}
+	if params.ServiceID != "" {
+		q = q.Where("service_id", "==", params.ServiceID)
+	}
+	q = q.OrderBy("created_at", firestore.Desc)
+	if params.Cursor != "" {
+		q = q.StartAfter(params.Cursor)
+	}
+	q = q.Limit(limit + 1)
+
+	iter := q.Documents(ctx)
 	defer iter.Stop()
 
 	var keys []*entity.APIKey
@@ -183,7 +203,7 @@ func (r *FirestoreRepository) ListKeysByTenant(ctx context.Context, tenantID str
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("firestore ListKeysByTenant: %w", err)
+			return nil, fmt.Errorf("firestore ListKeys: %w", err)
 		}
 
 		var doc firestoreKeyDoc
@@ -192,7 +212,28 @@ func (r *FirestoreRepository) ListKeysByTenant(ctx context.Context, tenantID str
 		}
 		keys = append(keys, fromDoc(&doc))
 	}
-	return keys, nil
+	if keys == nil {
+		keys = []*entity.APIKey{}
+	}
+
+	var nextCursor string
+	if len(keys) > limit {
+		nextCursor = keys[limit-1].CreatedAt
+		keys = keys[:limit]
+	}
+
+	return &entity.ListKeysResult{
+		Keys:       keys,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+func (r *FirestoreRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
+	res, err := r.ListKeys(ctx, entity.ListKeysParams{TenantID: tenantID, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	return res.Keys, nil
 }
 
 // UpdateKeyStatus はキーの状態および有効フラグを更新する。
@@ -366,4 +407,46 @@ func (r *FirestoreRepository) Ping(ctx context.Context) error {
 		return fmt.Errorf("firestore ping: %w", err)
 	}
 	return nil
+}
+
+func (r *FirestoreRepository) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	q := r.client.Collection(r.collection).Query
+	if tenantID != "" {
+		q = q.Where("tenant_id", "==", tenantID)
+	}
+	if serviceID != "" {
+		q = q.Where("service_id", "==", serviceID)
+	}
+
+	iter := q.Select("status", "current_month_usage").Documents(ctx)
+	defer iter.Stop()
+
+	stats := &entity.KeyStats{
+		Services: make([]string, 0),
+		Tenants:  make([]string, 0),
+	}
+	for {
+		docSnap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("firestore GetStats: %w", err)
+		}
+
+		stats.TotalKeys++
+		data := docSnap.Data()
+		if st, ok := data["status"].(string); ok {
+			switch entity.KeyStatus(st) {
+			case entity.StatusActive:
+				stats.ActiveKeys++
+			case entity.StatusRotating:
+				stats.RotatingKeys++
+			}
+		}
+		if u, ok := data["current_month_usage"].(int64); ok {
+			stats.TotalMonthlyUsage += u
+		}
+	}
+	return stats, nil
 }

@@ -103,6 +103,7 @@ func (u *KeyUsecase) CreateKey(ctx context.Context, input entity.CreateKeyInput)
 		Status:            entity.StatusActive,
 		IsActive:          true,
 		ExpiresAt:         expiresAt,
+		ItemType:          "KEY",
 		CreatedAt:         nowStr,
 		UpdatedAt:         nowStr,
 	}
@@ -117,9 +118,19 @@ func (u *KeyUsecase) CreateKey(ctx context.Context, input entity.CreateKeyInput)
 	}, nil
 }
 
-// ListKeys は指定テナントのキー一覧を取得する
+// ListKeys は指定テナントのキー一覧を取得する (後方互換)
 func (u *KeyUsecase) ListKeys(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
 	return u.repo.ListKeysByTenant(ctx, tenantID)
+}
+
+// ListKeysPaged はページネーションに対応したキー一覧を取得する
+func (u *KeyUsecase) ListKeysPaged(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	return u.repo.ListKeys(ctx, params)
+}
+
+// GetStats は指定テナント・サービス (空文字の場合は全件) の統計サマリーを取得する
+func (u *KeyUsecase) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	return u.repo.GetStats(ctx, tenantID, serviceID)
 }
 
 // GetKey は KeyID でキー詳細を取得する

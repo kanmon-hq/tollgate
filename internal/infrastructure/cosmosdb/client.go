@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -197,18 +199,49 @@ func (r *CosmosDBRepository) GetKeyByID(ctx context.Context, keyID string) (*ent
 	return nil, nil
 }
 
-// ListKeysByTenant は指定テナントのキー一覧を取得する。
-func (r *CosmosDBRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
-	query := "SELECT * FROM c WHERE c.tenant_id = @tenantID ORDER BY c.created_at DESC"
-	opt := &azcosmos.QueryOptions{
-		QueryParameters: []azcosmos.QueryParameter{
-			{Name: "@tenantID", Value: tenantID},
-		},
+// ListKeys はページネーションに対応したキー一覧を取得する。
+func (r *CosmosDBRepository) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 200 {
+		limit = 200
 	}
 
-	var results []*entity.APIKey
+	var query string
+	opt := &azcosmos.QueryOptions{
+		PageSizeHint: int32(limit),
+	}
+	if params.Cursor != "" {
+		opt.ContinuationToken = &params.Cursor
+	}
+
+	var whereClauses []string
+	var queryParams []azcosmos.QueryParameter
+
+	if params.TenantID != "" {
+		whereClauses = append(whereClauses, "c.tenant_id = @tenantID")
+		queryParams = append(queryParams, azcosmos.QueryParameter{Name: "@tenantID", Value: params.TenantID})
+	}
+	if params.ServiceID != "" {
+		whereClauses = append(whereClauses, "c.service_id = @serviceID")
+		queryParams = append(queryParams, azcosmos.QueryParameter{Name: "@serviceID", Value: params.ServiceID})
+	}
+
+	query = "SELECT * FROM c"
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	query += " ORDER BY c.created_at DESC"
+	if len(queryParams) > 0 {
+		opt.QueryParameters = queryParams
+	}
+
 	pager := r.container.NewQueryItemsPager(query, azcosmos.PartitionKey{}, opt)
-	for pager.More() {
+	var results []*entity.APIKey
+	var nextCursor string
+
+	if pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("cosmosdb query list keys: %w", err)
@@ -219,8 +252,26 @@ func (r *CosmosDBRepository) ListKeysByTenant(ctx context.Context, tenantID stri
 				results = append(results, fromCosmosItem(&item))
 			}
 		}
+		if page.ContinuationToken != nil {
+			nextCursor = *page.ContinuationToken
+		}
 	}
-	return results, nil
+	if results == nil {
+		results = []*entity.APIKey{}
+	}
+
+	return &entity.ListKeysResult{
+		Keys:       results,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+func (r *CosmosDBRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
+	res, err := r.ListKeys(ctx, entity.ListKeysParams{TenantID: tenantID, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	return res.Keys, nil
 }
 
 // UpdateKeyStatus はキーの状態および有効フラグを更新する。
@@ -375,4 +426,81 @@ func (r *CosmosDBRepository) Ping(ctx context.Context) error {
 		return fmt.Errorf("cosmosdb ping container: %w", err)
 	}
 	return nil
+}
+
+func (r *CosmosDBRepository) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	q := "SELECT c.status, c.current_month_usage, c.service_id, c.tenant_id FROM c"
+	var whereClauses []string
+	var queryParams []azcosmos.QueryParameter
+
+	if tenantID != "" {
+		whereClauses = append(whereClauses, "c.tenant_id = @tenant_id")
+		queryParams = append(queryParams, azcosmos.QueryParameter{Name: "@tenant_id", Value: tenantID})
+	}
+	if serviceID != "" {
+		whereClauses = append(whereClauses, "c.service_id = @service_id")
+		queryParams = append(queryParams, azcosmos.QueryParameter{Name: "@service_id", Value: serviceID})
+	}
+	if len(whereClauses) > 0 {
+		q += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	opt := &azcosmos.QueryOptions{}
+	if len(queryParams) > 0 {
+		opt.QueryParameters = queryParams
+	}
+
+	pager := r.container.NewQueryItemsPager(q, azcosmos.PartitionKey{}, opt)
+	stats := &entity.KeyStats{
+		Services: make([]string, 0),
+		Tenants:  make([]string, 0),
+	}
+
+	type statItem struct {
+		Status            string `json:"status"`
+		CurrentMonthUsage int64  `json:"current_month_usage"`
+		ServiceID         string `json:"service_id"`
+		TenantID          string `json:"tenant_id"`
+	}
+
+	servicesSet := make(map[string]struct{})
+	tenantsSet := make(map[string]struct{})
+
+	for pager.More() {
+		resp, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("cosmosdb GetStats: %w", err)
+		}
+		for _, raw := range resp.Items {
+			var it statItem
+			if err := json.Unmarshal(raw, &it); err == nil {
+				stats.TotalKeys++
+				switch entity.KeyStatus(it.Status) {
+				case entity.StatusActive:
+					stats.ActiveKeys++
+				case entity.StatusRotating:
+					stats.RotatingKeys++
+				}
+				stats.TotalMonthlyUsage += it.CurrentMonthUsage
+				if it.ServiceID != "" {
+					servicesSet[it.ServiceID] = struct{}{}
+				}
+				if it.TenantID != "" {
+					tenantsSet[it.TenantID] = struct{}{}
+				}
+			}
+		}
+	}
+
+	for s := range servicesSet {
+		stats.Services = append(stats.Services, s)
+	}
+	slices.Sort(stats.Services)
+
+	for t := range tenantsSet {
+		stats.Tenants = append(stats.Tenants, t)
+	}
+	slices.Sort(stats.Tenants)
+
+	return stats, nil
 }

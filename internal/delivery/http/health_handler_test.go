@@ -25,6 +25,9 @@ func (m *mockHealthRepo) GetKeyByID(ctx context.Context, keyID string) (*entity.
 func (m *mockHealthRepo) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
 	return nil, nil
 }
+func (m *mockHealthRepo) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	return &entity.ListKeysResult{Keys: []*entity.APIKey{}}, nil
+}
 func (m *mockHealthRepo) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
 	return nil
 }
@@ -42,6 +45,9 @@ func (m *mockHealthRepo) UpdateLastUsedAt(ctx context.Context, keyHash string, l
 	return nil
 }
 func (m *mockHealthRepo) Ping(ctx context.Context) error { return m.pingErr }
+func (m *mockHealthRepo) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	return &entity.KeyStats{}, nil
+}
 
 func TestHealthHandler_HealthCheck(t *testing.T) {
 	_, api := humatest.New(t)

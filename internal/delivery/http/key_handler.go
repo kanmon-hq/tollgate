@@ -20,13 +20,26 @@ type CreateKeyResponse struct {
 }
 
 type ListKeysRequest struct {
-	TenantID string `query:"tenant_id" doc:"対象テナント ID" required:"true" example:"dept-risk-01"`
+	TenantID  string `query:"tenant_id" doc:"対象テナント ID (省略時は全件取得)" example:"dept-risk-01"`
+	ServiceID string `query:"service_id" doc:"対象サービス ID (省略時は全件取得)" example:"ai-platform"`
+	Limit     int    `query:"limit" doc:"取得件数上限 (デフォルト: 50, 最大: 200)" example:"50"`
+	Cursor    string `query:"cursor" doc:"次ページ取得用カーソル (前回の next_cursor)" example:"eyJwayI..."`
 }
 
 type ListKeysResponse struct {
 	Body struct {
-		Keys []*entity.APIKey `json:"keys"`
+		Keys       []*entity.APIKey `json:"keys"`
+		NextCursor string           `json:"next_cursor,omitempty" example:"eyJwayI..."`
 	}
+}
+
+type GetStatsRequest struct {
+	TenantID  string `query:"tenant_id" doc:"対象テナント ID (省略時は全件集計)" example:"dept-risk-01"`
+	ServiceID string `query:"service_id" doc:"対象サービス ID (省略時は全件集計)" example:"ai-platform"`
+}
+
+type GetStatsResponse struct {
+	Body entity.KeyStats
 }
 
 type KeyIDParam struct {
@@ -87,22 +100,46 @@ func RegisterKeyHandlers(api huma.API, u *usecase.KeyUsecase) {
 		OperationID: "listApiKeys",
 		Method:      http.MethodGet,
 		Path:        "/v1/admin/keys",
-		Summary:     "テナント別キー一覧取得",
-		Description: "指定テナントに所属する API キーの一覧を取得します (平文はマスクされます)。",
+		Summary:     "キー一覧取得",
+		Description: "API キーの一覧を取得します (tenant_id 指定時は指定テナントのみ、省略時は全件取得。カーソルによるページネーション対応)。",
 		Tags:        []string{"Keys (Admin)"},
 		Security:    adminSec,
 	}, func(ctx context.Context, input *ListKeysRequest) (*ListKeysResponse, error) {
-		keys, err := u.ListKeys(ctx, input.TenantID)
+		res, err := u.ListKeysPaged(ctx, entity.ListKeysParams{
+			TenantID:  input.TenantID,
+			ServiceID: input.ServiceID,
+			Limit:     input.Limit,
+			Cursor:    input.Cursor,
+		})
 		if err != nil {
 			log.Printf("[ERROR] %s: %v", "キー一覧取得失敗", err)
 			return nil, huma.Error500InternalServerError("キー一覧取得失敗")
 		}
-		if keys == nil {
-			keys = []*entity.APIKey{}
-		}
 		return &ListKeysResponse{Body: struct {
-			Keys []*entity.APIKey `json:"keys"`
-		}{Keys: keys}}, nil
+			Keys       []*entity.APIKey `json:"keys"`
+			NextCursor string           `json:"next_cursor,omitempty" example:"eyJwayI..."`
+		}{
+			Keys:       res.Keys,
+			NextCursor: res.NextCursor,
+		}}, nil
+	})
+
+	// 2.5. GET /v1/admin/stats
+	huma.Register(api, huma.Operation{
+		OperationID: "getStats",
+		Method:      http.MethodGet,
+		Path:        "/v1/admin/stats",
+		Summary:     "キーおよび利用量統計取得",
+		Description: "登録済みキー総数、有効キー数、当月総利用量、ローテーション移行中キー数を取得します (tenant_id / service_id 省略時は全社統計)。",
+		Tags:        []string{"Keys (Admin)"},
+		Security:    adminSec,
+	}, func(ctx context.Context, input *GetStatsRequest) (*GetStatsResponse, error) {
+		stats, err := u.GetStats(ctx, input.TenantID, input.ServiceID)
+		if err != nil {
+			log.Printf("[ERROR] %s: %v", "統計取得失敗", err)
+			return nil, huma.Error500InternalServerError("統計取得失敗")
+		}
+		return &GetStatsResponse{Body: *stats}, nil
 	})
 
 	// 3. GET /v1/admin/keys/{key_id}

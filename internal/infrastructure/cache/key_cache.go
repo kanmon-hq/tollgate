@@ -81,6 +81,10 @@ func (c *CachedKeyRepository) ListKeysByTenant(ctx context.Context, tenantID str
 	return c.underlying.ListKeysByTenant(ctx, tenantID)
 }
 
+func (c *CachedKeyRepository) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	return c.underlying.ListKeys(ctx, params)
+}
+
 func (c *CachedKeyRepository) UpdateKeySettings(ctx context.Context, keyHash string, input entity.UpdateKeyInput) (*entity.APIKey, error) {
 	key, err := c.underlying.UpdateKeySettings(ctx, keyHash, input)
 	if err == nil {
@@ -124,6 +128,10 @@ func (c *CachedKeyRepository) UpdateLastUsedAt(ctx context.Context, keyHash stri
 
 func (c *CachedKeyRepository) Ping(ctx context.Context) error {
 	return c.underlying.Ping(ctx)
+}
+
+func (c *CachedKeyRepository) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	return c.underlying.GetStats(ctx, tenantID, serviceID)
 }
 
 func (c *CachedKeyRepository) invalidate(keyHash string) {

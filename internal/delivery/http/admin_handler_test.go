@@ -46,11 +46,31 @@ func (m *fullMockKeyRepo) GetKeyByID(ctx context.Context, keyID string) (*entity
 func (m *fullMockKeyRepo) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
 	var list []*entity.APIKey
 	for _, k := range m.keysByHash {
-		if k.TenantID == tenantID {
+		if tenantID == "" || k.TenantID == tenantID {
 			list = append(list, k)
 		}
 	}
 	return list, nil
+}
+
+func (m *fullMockKeyRepo) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	keys, err := m.ListKeysByTenant(ctx, params.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	var nextCursor string
+	if len(keys) > limit {
+		nextCursor = "dummy_next"
+		keys = keys[:limit]
+	}
+	return &entity.ListKeysResult{
+		Keys:       keys,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 func (m *fullMockKeyRepo) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
@@ -106,6 +126,22 @@ func (m *fullMockKeyRepo) Ping(ctx context.Context) error {
 	return nil
 }
 
+func (m *fullMockKeyRepo) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	stats := &entity.KeyStats{}
+	for _, k := range m.keysByHash {
+		if (tenantID == "" || k.TenantID == tenantID) && (serviceID == "" || k.ServiceID == serviceID) {
+			stats.TotalKeys++
+			if k.Status == entity.StatusActive {
+				stats.ActiveKeys++
+			} else if k.Status == entity.StatusRotating {
+				stats.RotatingKeys++
+			}
+			stats.TotalMonthlyUsage += k.CurrentMonthUsage
+		}
+	}
+	return stats, nil
+}
+
 func TestAdminAPI_FullOperations(t *testing.T) {
 	repo := newFullMockKeyRepo()
 	keyUsecase := usecase.NewKeyUsecase(repo)
@@ -145,13 +181,28 @@ func TestAdminAPI_FullOperations(t *testing.T) {
 	keyID := createResp.KeyID
 	rawKey := createResp.RawKey
 
-	// 2. GET /v1/admin/keys?tenant_id=tenant-alpha (List Keys)
+	// 2. GET /v1/admin/keys?tenant_id=tenant-alpha (List Keys by Tenant)
 	req = httptest.NewRequest(http.MethodGet, "/v1/admin/keys?tenant_id=tenant-alpha", nil)
 	req.Header.Set("Authorization", "Bearer "+adminKey)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ListKeys expected 200, got %d", rec.Code)
+	}
+
+	// 2.1. GET /v1/admin/keys without tenant_id (List All Keys)
+	req = httptest.NewRequest(http.MethodGet, "/v1/admin/keys", nil)
+	req.Header.Set("Authorization", "Bearer "+adminKey)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListKeys without tenant_id expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var allKeysResp struct {
+		Keys []*entity.APIKey `json:"keys"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &allKeysResp); err != nil || len(allKeysResp.Keys) == 0 {
+		t.Fatalf("expected non-empty keys when listing without tenant_id, got %v", allKeysResp.Keys)
 	}
 
 	// 3. GET /v1/admin/keys/{key_id} (Get Key)
@@ -312,6 +363,24 @@ func TestAdminAPI_FullOperations(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusInternalServerError {
 			t.Errorf("expected 500 on delete non-existent, got %d", rec.Code)
+		}
+	})
+
+	t.Run("GetStats success", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/admin/stats", nil)
+		req.Header.Set("Authorization", "Bearer "+adminKey)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK on getStats, got %d", rec.Code)
+		}
+
+		var stats entity.KeyStats
+		if err := json.Unmarshal(rec.Body.Bytes(), &stats); err != nil {
+			t.Fatalf("failed to decode stats: %v", err)
+		}
+		if stats.TotalKeys < 1 {
+			t.Errorf("expected at least 1 total key, got %d", stats.TotalKeys)
 		}
 	})
 }

@@ -195,11 +195,42 @@ func (r *SQLRepository) GetKeyByID(ctx context.Context, keyID string) (*entity.A
 	return key, nil
 }
 
-func (r *SQLRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
-	q := `SELECT` + selectFields + ` FROM api_keys WHERE tenant_id = ? ORDER BY created_at DESC`
-	rows, err := r.db.QueryContext(ctx, q, tenantID)
+func (r *SQLRepository) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 200 {
+		limit = 200
+	}
+
+	var conditions []string
+	var args []interface{}
+
+	if params.TenantID != "" {
+		conditions = append(conditions, "tenant_id = ?")
+		args = append(args, params.TenantID)
+	}
+
+	if params.ServiceID != "" {
+		conditions = append(conditions, "service_id = ?")
+		args = append(args, params.ServiceID)
+	}
+
+	if params.Cursor != "" {
+		conditions = append(conditions, "created_at < ?")
+		args = append(args, params.Cursor)
+	}
+
+	q := `SELECT ` + selectFields + ` FROM api_keys`
+	if len(conditions) > 0 {
+		q += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	q += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit+1)
+
+	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, fmt.Errorf("sqlrepo ListKeysByTenant: %w", err)
+		return nil, fmt.Errorf("sqlrepo ListKeys: %w", err)
 	}
 	defer rows.Close()
 
@@ -207,11 +238,35 @@ func (r *SQLRepository) ListKeysByTenant(ctx context.Context, tenantID string) (
 	for rows.Next() {
 		key, err := scanKey(rows)
 		if err != nil {
-			return nil, fmt.Errorf("sqlrepo ListKeysByTenant scan: %w", err)
+			return nil, fmt.Errorf("sqlrepo ListKeys scan: %w", err)
 		}
 		keys = append(keys, key)
 	}
-	return keys, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if keys == nil {
+		keys = []*entity.APIKey{}
+	}
+
+	var nextCursor string
+	if len(keys) > limit {
+		nextCursor = keys[limit-1].CreatedAt
+		keys = keys[:limit]
+	}
+
+	return &entity.ListKeysResult{
+		Keys:       keys,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+func (r *SQLRepository) ListKeysByTenant(ctx context.Context, tenantID string) ([]*entity.APIKey, error) {
+	res, err := r.ListKeys(ctx, entity.ListKeysParams{TenantID: tenantID, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	return res.Keys, nil
 }
 
 func (r *SQLRepository) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
@@ -370,6 +425,68 @@ func (r *SQLRepository) UpdateLastUsedAt(ctx context.Context, keyHash string, t 
 
 func (r *SQLRepository) Ping(ctx context.Context) error {
 	return r.db.PingContext(ctx)
+}
+
+func (r *SQLRepository) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	q := `SELECT 
+		COUNT(*),
+		COUNT(CASE WHEN status = 'active' THEN 1 END),
+		COALESCE(SUM(current_month_usage), 0),
+		COUNT(CASE WHEN status = 'rotating' THEN 1 END)
+	FROM api_keys`
+	var conditions []string
+	var args []any
+	if tenantID != "" {
+		conditions = append(conditions, "tenant_id = ?")
+		args = append(args, tenantID)
+	}
+	if serviceID != "" {
+		conditions = append(conditions, "service_id = ?")
+		args = append(args, serviceID)
+	}
+	if len(conditions) > 0 {
+		q += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	stats := &entity.KeyStats{
+		Services: make([]string, 0),
+		Tenants:  make([]string, 0),
+	}
+	err := r.db.QueryRowContext(ctx, q, args...).Scan(
+		&stats.TotalKeys,
+		&stats.ActiveKeys,
+		&stats.TotalMonthlyUsage,
+		&stats.RotatingKeys,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlrepo GetStats: %w", err)
+	}
+
+	// 登録済みサービス一覧
+	sRows, err := r.db.QueryContext(ctx, "SELECT DISTINCT service_id FROM api_keys WHERE service_id != '' ORDER BY service_id")
+	if err == nil {
+		defer sRows.Close()
+		for sRows.Next() {
+			var s string
+			if err := sRows.Scan(&s); err == nil {
+				stats.Services = append(stats.Services, s)
+			}
+		}
+	}
+
+	// 登録済みテナント一覧
+	tRows, err := r.db.QueryContext(ctx, "SELECT DISTINCT tenant_id FROM api_keys WHERE tenant_id != '' ORDER BY tenant_id")
+	if err == nil {
+		defer tRows.Close()
+		for tRows.Next() {
+			var t string
+			if err := tRows.Scan(&t); err == nil {
+				stats.Tenants = append(stats.Tenants, t)
+			}
+		}
+	}
+
+	return stats, nil
 }
 
 // ─── スキーマ自動作成 ─────────────────────────────────────────────────────────

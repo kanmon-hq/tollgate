@@ -29,6 +29,7 @@ type MockKeyRepository struct {
 	GetKeyByHashFunc          func(ctx context.Context, keyHash string) (*entity.APIKey, error)
 	GetKeyByIDFunc            func(ctx context.Context, keyID string) (*entity.APIKey, error)
 	ListKeysByTenantFunc      func(ctx context.Context, tenantID string) ([]*entity.APIKey, error)
+	ListKeysFunc              func(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error)
 	UpdateKeyStatusFunc       func(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error
 	UpdateKeySettingsFunc     func(ctx context.Context, keyHash string, input entity.UpdateKeyInput) (*entity.APIKey, error)
 	RotateKeyFunc             func(ctx context.Context, params entity.RotateKeyParams) (*entity.APIKey, error)
@@ -36,6 +37,7 @@ type MockKeyRepository struct {
 	IncrementMonthlyUsageFunc func(ctx context.Context, keyHash string, month string, increment int64) (int64, error)
 	UpdateLastUsedAtFunc      func(ctx context.Context, keyHash string, lastUsed time.Time) error
 	PingFunc                  func(ctx context.Context) error
+	GetStatsFunc              func(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error)
 }
 
 func (m *MockKeyRepository) PutKey(ctx context.Context, key *entity.APIKey) error {
@@ -64,6 +66,20 @@ func (m *MockKeyRepository) ListKeysByTenant(ctx context.Context, tenantID strin
 		return m.ListKeysByTenantFunc(ctx, tenantID)
 	}
 	return nil, nil
+}
+
+func (m *MockKeyRepository) ListKeys(ctx context.Context, params entity.ListKeysParams) (*entity.ListKeysResult, error) {
+	if m.ListKeysFunc != nil {
+		return m.ListKeysFunc(ctx, params)
+	}
+	if m.ListKeysByTenantFunc != nil {
+		keys, err := m.ListKeysByTenantFunc(ctx, params.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		return &entity.ListKeysResult{Keys: keys}, nil
+	}
+	return &entity.ListKeysResult{Keys: []*entity.APIKey{}}, nil
 }
 
 func (m *MockKeyRepository) UpdateKeyStatus(ctx context.Context, keyHash string, status entity.KeyStatus, isActive bool) error {
@@ -113,6 +129,13 @@ func (m *MockKeyRepository) Ping(ctx context.Context) error {
 		return m.PingFunc(ctx)
 	}
 	return nil
+}
+
+func (m *MockKeyRepository) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
+	if m.GetStatsFunc != nil {
+		return m.GetStatsFunc(ctx, tenantID, serviceID)
+	}
+	return &entity.KeyStats{}, nil
 }
 
 func TestVerifyUsecase_VerifyKey(t *testing.T) {
