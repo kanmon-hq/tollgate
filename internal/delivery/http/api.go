@@ -91,6 +91,7 @@ func NewRouter(cfg *config.Config, keyUsecase *usecase.KeyUsecase, verifyUsecase
 	RegisterMetricsHandler(api)
 	RegisterKeyHandlers(api, keyUsecase)
 	RegisterVerifyHandler(api, verifyUsecase)
+	RegisterScopeHandlers(api, cfg.Routes)
 
 	// 4. リバースプロキシ (プロキシハンドラーが存在する場合)
 	if proxyHandler != nil {

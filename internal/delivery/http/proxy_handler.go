@@ -9,6 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,9 @@ func getUserContextHeaders() []string {
 
 // RouteConfig は動的ルーティングのルール定義 (config.RouteConfig のエイリアス)
 type RouteConfig = config.RouteConfig
+
+// PathRule はパスごとの詳細スコープルール定義 (config.PathRule のエイリアス)
+type PathRule = config.PathRule
 
 // routeEntry は初期化済みのルート情報
 type routeEntry struct {
@@ -162,6 +166,7 @@ func NewMultiTargetProxy(routes []*RouteConfig, defaultTargetURL string, verifyU
 				Target:      cfg.Target,
 				Scope:       cfg.Scope,
 				StripPrefix: cfg.StripPrefix,
+				PathRules:   cfg.PathRules,
 			},
 			prefixSlash: prefix + "/",
 			target:      target,
@@ -235,6 +240,70 @@ func extractAPIKey(r *http.Request) string {
 	return ""
 }
 
+// GetRoutes は設定されているルート一覧を返す
+func (m *MultiTargetProxy) GetRoutes() []*RouteConfig {
+	routes := make([]*RouteConfig, 0, len(m.routes))
+	for _, entry := range m.routes {
+		if entry.config != nil {
+			routes = append(routes, entry.config)
+		}
+	}
+	return routes
+}
+
+// matchPathPattern はパスパターンとの一致判定を行う
+func matchPathPattern(pattern, targetPath string) bool {
+	if pattern == "" || pattern == "*" || pattern == "/*" {
+		return true
+	}
+	if pattern == targetPath {
+		return true
+	}
+	if strings.HasSuffix(pattern, "/**") {
+		prefix := strings.TrimSuffix(pattern, "/**")
+		if strings.HasPrefix(targetPath, prefix) {
+			return true
+		}
+	}
+	if strings.HasSuffix(pattern, "/*") {
+		prefix := strings.TrimSuffix(pattern, "/*")
+		if strings.HasPrefix(targetPath, prefix) {
+			return true
+		}
+	}
+	matched, err := path.Match(pattern, targetPath)
+	return err == nil && matched
+}
+
+// resolveRequiredScope はパスルールに基づいてリクエストに必要なスコープを解決する
+func (m *MultiTargetProxy) resolveRequiredScope(route *routeEntry, reqPath string, method string) string {
+	if route == nil || route.config == nil {
+		return ""
+	}
+	if len(route.config.PathRules) > 0 {
+		subPath := reqPath
+		if strings.HasPrefix(reqPath, route.config.Prefix) {
+			subPath = strings.TrimPrefix(reqPath, route.config.Prefix)
+			if !strings.HasPrefix(subPath, "/") {
+				subPath = "/" + subPath
+			}
+		}
+
+		for _, rule := range route.config.PathRules {
+			if rule == nil {
+				continue
+			}
+			if rule.Method != "" && !strings.EqualFold(rule.Method, method) {
+				continue
+			}
+			if matchPathPattern(rule.Path, subPath) || matchPathPattern(rule.Path, reqPath) {
+				return rule.Scope
+			}
+		}
+	}
+	return route.config.Scope
+}
+
 // matchRoute はリクエストパスにマッチする最長のルートを検索する
 func (m *MultiTargetProxy) matchRoute(path string) *routeEntry {
 	var bestMatch *routeEntry
@@ -277,11 +346,8 @@ func (m *MultiTargetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. 要求スコープの決定 (ルートに指定されていればそのスコープを要求)
-	var requiredScope string
-	if route != nil && route.config.Scope != "" {
-		requiredScope = route.config.Scope
-	}
+	// 3. 要求スコープの決定 (パスルールがあれば優先、なければルートのスコープを要求)
+	requiredScope := m.resolveRequiredScope(route, r.URL.Path, r.Method)
 
 	// 4. API キー検証 & レートリミット & スコープ判定
 	verifyOut, err := m.verifyUsecase.VerifyKey(r.Context(), entity.VerifyKeyInput{

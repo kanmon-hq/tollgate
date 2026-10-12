@@ -504,5 +504,86 @@ func TestMultiTargetProxy_UserContextHeadersAndRequestID(t *testing.T) {
 			t.Errorf("expected response header to have trace-id-xyz-123, got %q", rec.Header().Get("X-Request-Id"))
 		}
 	})
+
+	t.Run("PathRules: path and method based scope restrictions", func(t *testing.T) {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer backend.Close()
+
+		routes := []*RouteConfig{
+			{
+				Prefix: "/billing",
+				Target: backend.URL,
+				Scope:  "billing:*",
+				PathRules: []*PathRule{
+					{Path: "/approve", Method: "POST", Scope: "billing:admin", Description: "Approve payment"},
+					{Path: "/invoices/*", Method: "GET", Scope: "billing:read", Description: "Read invoice"},
+				},
+			},
+		}
+
+		proxy, repo := setupTestMultiProxy(t, routes, nil)
+
+		// 1. read-only key
+		readKey := "tlge-live-readonly1234567890123"
+		repo.keys[usecase.HashKey(readKey)] = &entity.APIKey{
+			KeyID:        "key-read",
+			ServiceID:    "billing",
+			TenantID:     "t-1",
+			IsActive:     true,
+			Status:       entity.StatusActive,
+			Scopes:       []string{"billing:read"},
+			RateLimitRPM: 100,
+		}
+
+		// 2. admin key
+		adminKey := "tlge-live-admin1234567890123456"
+		repo.keys[usecase.HashKey(adminKey)] = &entity.APIKey{
+			KeyID:        "key-admin",
+			ServiceID:    "billing",
+			TenantID:     "t-1",
+			IsActive:     true,
+			Status:       entity.StatusActive,
+			Scopes:       []string{"billing:admin"},
+			RateLimitRPM: 100,
+		}
+
+		// Read key accessing GET /billing/invoices/100 -> should succeed (200)
+		req1 := httptest.NewRequest("GET", "/billing/invoices/100", nil)
+		req1.Header.Set("Authorization", "Bearer "+readKey)
+		rec1 := httptest.NewRecorder()
+		proxy.ServeHTTP(rec1, req1)
+		if rec1.Code != http.StatusOK {
+			t.Errorf("expected 200 for readKey on GET /billing/invoices/100, got %d", rec1.Code)
+		}
+
+		// Read key accessing POST /billing/approve -> should fail (403 forbidden)
+		req2 := httptest.NewRequest("POST", "/billing/approve", nil)
+		req2.Header.Set("Authorization", "Bearer "+readKey)
+		rec2 := httptest.NewRecorder()
+		proxy.ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusForbidden {
+			t.Errorf("expected 403 for readKey on POST /billing/approve, got %d", rec2.Code)
+		}
+
+		// Admin key accessing POST /billing/approve -> should succeed (200)
+		req3 := httptest.NewRequest("POST", "/billing/approve", nil)
+		req3.Header.Set("Authorization", "Bearer "+adminKey)
+		rec3 := httptest.NewRecorder()
+		proxy.ServeHTTP(rec3, req3)
+		if rec3.Code != http.StatusOK {
+			t.Errorf("expected 200 for adminKey on POST /billing/approve, got %d", rec3.Code)
+		}
+
+		// Admin key accessing GET /billing/invoices/100 -> should fail (403, lacks billing:read)
+		req4 := httptest.NewRequest("GET", "/billing/invoices/100", nil)
+		req4.Header.Set("Authorization", "Bearer "+adminKey)
+		rec4 := httptest.NewRecorder()
+		proxy.ServeHTTP(rec4, req4)
+		if rec4.Code != http.StatusForbidden {
+			t.Errorf("expected 403 for adminKey on GET /billing/invoices/100, got %d", rec4.Code)
+		}
+	})
 }
 

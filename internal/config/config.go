@@ -48,12 +48,21 @@ func loadDotEnv(path string) {
 	}
 }
 
+// PathRule はルート配下のサブパスや HTTP メソッドごとに必要なスコープを制御するルール
+type PathRule struct {
+	Path        string `json:"path"`                  // サブパスパターン (例: "/approve", "/invoices/*", "/admin/**")
+	Method      string `json:"method,omitempty"`      // HTTP メソッド (例: "POST", "GET", 空文字時は全メソッド)
+	Scope       string `json:"scope"`                 // 要求スコープ (例: "billing:admin")
+	Description string `json:"description,omitempty"` // ルール説明 (例: "請求書承認")
+}
+
 // RouteConfig は動的ルーティングのルール定義
 type RouteConfig struct {
-	Prefix      string `json:"prefix"`                 // マッチさせるパスプレフィックス (例: "/mcp")
-	Target      string `json:"target"`                 // 転送先ベースURL (例: "http://mcp-gateway:8000")
-	Scope       string `json:"scope,omitempty"`        // 必要な API キースコープ (例: "mcp:*")
-	StripPrefix bool   `json:"strip_prefix,omitempty"` // true の場合、転送時に Prefix を除去する
+	Prefix      string      `json:"prefix"`                 // マッチさせるパスプレフィックス (例: "/mcp")
+	Target      string      `json:"target"`                 // 転送先ベースURL (例: "http://mcp-gateway:8000")
+	Scope       string      `json:"scope,omitempty"`        // 必要な API キースコープ (例: "mcp:*")
+	StripPrefix bool        `json:"strip_prefix,omitempty"` // true の場合、転送時に Prefix を除去する
+	PathRules   []*PathRule `json:"path_rules,omitempty"`   // パス・メソッド単位の詳細スコープルール
 }
 
 // Config は Tollgate アプリケーション全体の環境設定
