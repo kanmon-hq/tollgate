@@ -115,3 +115,60 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # 4. 多言語ドキュメント同期チェック (英語正本 & 日本語訳の乖離防止)
+  check-docs-sync:
+    name: Check Documentation Translation Sync
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify Documentation Pair Sync
+        run: |
+          echo "Comparing changes between origin/${{ github.base_ref }} and HEAD..."
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          MISSING=0
+
+          # 1. README.md <-> README.ja.md の同期チェック
+          if echo "$CHANGED_FILES" | grep -qx "README.md"; then
+            if [ -f "README.ja.md" ] && ! echo "$CHANGED_FILES" | grep -qx "README.ja.md"; then
+              echo "::warning file=README.md::README.md was updated, but Japanese translation (README.ja.md) was not updated."
+              MISSING=1
+            fi
+          fi
+          if echo "$CHANGED_FILES" | grep -qx "README.ja.md"; then
+            if ! echo "$CHANGED_FILES" | grep -qx "README.md"; then
+              echo "::warning file=README.ja.md::README.ja.md was updated, but primary English documentation (README.md) was not updated."
+              MISSING=1
+            fi
+          fi
+
+          # 2. docs/*.md -> docs/ja/*.md の同期チェック (英語更新時)
+          for file in $(echo "$CHANGED_FILES" | grep -E '^docs/[^/]+\.md$'); do
+            base_name=$(basename "$file")
+            ja_file="docs/ja/$base_name"
+            if [ -f "$ja_file" ] && ! echo "$CHANGED_FILES" | grep -qx "$ja_file"; then
+              echo "::warning file=$file::$file was updated, but Japanese translation ($ja_file) was not updated."
+              MISSING=1
+            fi
+          done
+
+          # 3. docs/ja/*.md -> docs/*.md の同期チェック (日本語更新時)
+          for file in $(echo "$CHANGED_FILES" | grep -E '^docs/ja/[^/]+\.md$'); do
+            base_name=$(basename "$file")
+            en_file="docs/$base_name"
+            if [ -f "$en_file" ] && ! echo "$CHANGED_FILES" | grep -qx "$en_file"; then
+              echo "::warning file=$file::$file was updated, but primary English documentation ($en_file) was not updated."
+              MISSING=1
+            fi
+          done
+
+          if [ $MISSING -ne 0 ]; then
+            echo "Notice: Some documentation files have pending translations between English and Japanese. (CI continues as warning)"
+          else
+            echo "All documentation updates are properly synchronized."
+          fi

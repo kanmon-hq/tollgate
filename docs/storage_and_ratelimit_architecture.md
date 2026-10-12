@@ -1,64 +1,43 @@
-# ストレージおよびレート制限アーキテクチャ選定方針 (Storage & Rate Limiting Architecture)
+# Storage & Rate Limiting Architecture Decision Policy (Requirement C-6)
 
-本書は、Tollgate のデータストア（DB バックエンド）およびレートリミットエンジンの技術選定基準と、将来的な移行方針を定める（要件 C-6）。
+**English** | [日本語](ja/storage_and_ratelimit_architecture.md)
 
----
-
-## 1. 結論と初期フェーズ採用方針
-
-**初期フェーズ（プロダクト導入〜初期運用）は「DynamoDB + インメモリ（Local Memory）」で開始する。**
-
-### 選定理由
-1. **インフラ構成の最小化とコスト削減**:
-   - 初期段階で ElastiCache (Valkey / Redis) クラスターを常時起動すると、VPC サブネット、セキュリティグループ、NAT ゲートウェイ、および常時課金ノードの運用・保守コストが発生する。
-   - DynamoDB（オンデマンド / PAY_PER_REQUEST）と ECS Fargate のインメモリを利用することで、外部キャッシュクラスター不要の最小構成で即座に運用を開始できる。
-2. **十分なスループットと性能**:
-   - Tollgate はキー検証結果をインメモリキャッシュ（`KEY_CACHE_TTL=10` 秒、設定可能）で保持するため、DynamoDB への読み取り負荷は劇的に削減される。
-   - インメモリレートリミッター（Token Bucket）はマイクロ秒未満で判定が完了し、極めて低レイテンシ。
-3. **将来の移行容易性（疎結合設計）**:
-   - Tollgate はすでにリポジトリ層・レートリミッター層が Go の interface で完全に抽象化されており、コード変更ゼロ・環境変数の切り替えのみで Valkey / Redis へ移行可能。
+This document details the architectural criteria and transition strategy for Tollgate's data persistence backends and rate limiting engines.
 
 ---
 
-## 2. フェーズ別アーキテクチャ比較
+## 1. Storage Backend Selection
 
-| 項目 | フェーズ 1: 初期構成 (DynamoDB + Memory) | フェーズ 2: 大規模・分散構成 (DynamoDB + Valkey) |
-|---|---|---|
-| **DB バックエンド** | Amazon DynamoDB (オンデマンド) | Amazon DynamoDB (オンデマンド / プロビジョンド) |
-| **レートリミット** | `RATE_LIMIT_BACKEND=memory` (各タスク内メモリ) | `RATE_LIMIT_BACKEND=valkey` (ElastiCache Serverless) |
-| **キャッシュ共有** | タスク個別 (ローカルインメモリ) | 全タスク共有 (分散 Valkey Sliding Window) |
-| **常時インフラコスト** | **ほぼゼロ (従量課金のみ)** | ElastiCache 月額費用が発生 |
-| **主なユースケース** | ECS タスク数 1〜数台、中規模トラフィック | ECS タスク多数、厳密なクラスター横断レート制限が必要 |
+Tollgate supports multiple database backends to accommodate various hosting models and scalability tiers:
 
----
-
-## 3. ElastiCache (Valkey) への移行判断基準 (Triggers)
-
-以下のいずれかの条件に達した時点で、ElastiCache Valkey（または Redis）の導入を実施する。
-
-1. **ECS Fargate タスクの水平スケール数**:
-   - タスク数が 5 台以上になり、タスク間でレート制限カウンタを厳密に合算・共有する必要性が生じた場合。
-   - （※タスク個別レート制限でも許容できる場合は、タスク数 × RPM の設計で継続可能）。
-2. **秒間リクエスト数 (RPS) の増大**:
-   - ピークトラフィックが数千〜数万 RPS に達し、クラスター全体でのミリ秒以下の厳密な Sliding Window レート制御が求められた場合。
-3. **マルチリージョン展開**:
-   - キャッシュの同期や分散データ共有が必要となった場合。
+| Backend | Primary Use Case | Performance & Characteristics |
+|:---|:---|:---|
+| **Amazon DynamoDB** | AWS Production Default | Serverless, zero maintenance overhead, predictable sub-10ms point reads with Global Secondary Indexes (GSIs). |
+| **Azure Cosmos DB** | Azure Production Default | Global distribution, Point Read optimized (1 RU latency < 2ms). |
+| **Google Cloud Firestore** | GCP Production Default | Serverless document store with atomic transactions. |
+| **SQLite (Pure Go)** | Local Dev, PoC, Single-Node | Runs in-process with zero external containers or CGO compilation prerequisites. |
 
 ---
 
-## 4. Valkey への切り替え手順 (ゼロコード変更)
+## 2. Rate Limiting Strategy: Initial Phase vs. High Scale
 
-移行時は、アプリケーションコードの修正やビルドは一切不要。ECS タスク定義の環境変数を更新するだけで完了する。
+### Phase 1: In-Memory / DynamoDB Simplicity
+- **Initial Deployment**:
+  `RATE_LIMIT_BACKEND=memory` (or `dynamodb`).
+- **Rationale**:
+  Avoids the operational overhead, VPC peering, and baseline cost of managing an ElastiCache cluster during initial launch. With in-process sliding window tracking, latency is sub-millisecond.
 
-```bash
-# 1. ElastiCache (Valkey) を作成後、環境変数を設定
-RATE_LIMIT_BACKEND=valkey
-VALKEY_URL=redis://tollgate-valkey.xxxx.cache.amazonaws.com:6379/0
+### Phase 2: Scale-Out with Redis / Valkey
+- **Horizontal Scaling**:
+  When Tollgate scales out across multiple container tasks requiring global rate limit consistency, configure:
+  `RATE_LIMIT_BACKEND=redis` (or `two-tier`) and `VALKEY_URL=redis://...`.
+- **Zero-Code Migration**:
+  Switching the rate limiting engine is entirely configuration-driven via environment variables without code modification or schema migrations.
 
-# (または個別指定)
-# REDIS_ADDR=tollgate-valkey.xxxx.cache.amazonaws.com:6379
-# REDIS_PASSWORD=
-# REDIS_DB=0
-```
+---
 
-Tollgate の ECS サービスをローリング再デプロイすることで、ダウンタイムゼロで分散レート制限構成へ移行できる。
+## 3. Two-Tier Hybrid Limiting
+
+For ultra-high-throughput endpoints where querying Redis on every request could saturate cache connection limits, Tollgate provides a **Two-Tier Limiter** (`RATE_LIMIT_BACKEND=two-tier`):
+1. **L1 Local Memory**: Rejects obvious spikes locally in memory before hitting network caches.
+2. **L2 Valkey / Redis**: Periodically synchronizes global consumption across instances.

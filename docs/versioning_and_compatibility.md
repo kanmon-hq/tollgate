@@ -1,84 +1,45 @@
-# バージョン固定と互換性規約 (Versioning & Compatibility Policy)
+# Versioning & Compatibility Policy (Requirement C-7)
 
-本書は、Tollgate およびこれを利用・連携するシステム全体におけるバージョン管理、互換性維持、およびプロダクトでのバージョン固定（Pinning）に関する規約を定める（要件 C-7）。
+**English** | [日本語](ja/versioning_and_compatibility.md)
 
----
-
-## 1. バージョニング方針 (Semantic Versioning)
-
-Tollgate は **Semantic Versioning 2.0.0 (SemVer)** に厳格に従ってバージョンを付与する。
-
-形式: `vMAJOR.MINOR.PATCH`（例: `v1.2.0`）
-
-| バージョン要素 | 更新契機 | 互換性 |
-|---|---|---|
-| **MAJOR (メジャー)** | 破壊的変更（既存の API 仕様、転送ヘッダー仕様、必須環境変数の変更・廃止）を含む場合 | **後方互換性なし** |
-| **MINOR (マイナー)** | 後方互換性を保った新機能追加、バックエンドドライバ追加、非推奨警告の導入 | **後方互換性あり** |
-| **PATCH (パッチ)** | 後方互換性を保ったバグ修正、セキュリティ脆弱性の修正、内部パフォーマンス改善 | **後方互換性あり** |
+This document establishes versioning standards, backward compatibility guarantees, and version-pinning practices for Tollgate and integrating applications.
 
 ---
 
-## 2. 破壊的変更 (Breaking Changes) の定義
+## 1. Semantic Versioning (SemVer 2.0.0)
 
-以下の変更を行う場合は、**必ずメジャーバージョン（vX.0.0）をインクリメント**しなければならない。
+Tollgate follows [Semantic Versioning 2.0.0](https://semver.org/):
 
-1. **下流バックエンド向けヘッダー仕様の変更**:
-   - `X-Tenant-ID`, `X-Key-ID`, `X-Service-ID` 等の必須ヘッダーの名称・フォーマット変更、または削除。
-   - 透過・除去されるユーザーコンテキストヘッダー（`X-User-Id` 等）のデフォルト挙動の変更。
-2. **管理 Web API (`/v1/admin/*`) の仕様変更**:
-   - 既存エンドポイントの削除・パス変更。
-   - 既存リクエストボディにおける必須フィールドの追加、既存フィールドの型変更や削除。
-   - レスポンスのスキーマ構造の破壊的変更。
-3. **認証・認可ポリシーの変更**:
-   - API キーのプレフィックス体系やハッシュアルゴリズムの互換性のない変更。
-   - フェイルファスト（403 拒絶）挙動の変更。
-4. **環境変数の廃止・変更**:
-   - 必須環境変数の名称変更、またはフォールバックのない挙動変更。
+$$\text{MAJOR}.\text{MINOR}.\text{PATCH}$$
+
+- **MAJOR**: Breaking changes that alter public API schemas, proxy forwarding behaviors, or configuration structures.
+- **MINOR**: Backward-compatible new features, added database backends, or non-breaking API additions.
+- **PATCH**: Backward-compatible bug fixes, security patches, and internal performance optimizations.
 
 ---
 
-## 3. プロダクト側でのバージョン固定 (Version Pinning)
+## 2. Compatibility Guarantees
 
-Tollgate をプロダクト（ECS Fargate、Docker Compose、Kubernetes 等）へ導入する際は、**バージョンを必ず明示的に固定**すること。
+### Forward & Backward Compatibility
+- **Header Contracts**: Headers injected by Tollgate (`X-Tenant-ID`, `X-Service-ID`, `X-Key-ID`, `X-Key-Prefix`, `X-Request-Id`) maintain stable naming and semantic behavior across all minor releases.
+- **Configuration Compatibility**: Renaming or deprecating environment variables requires at least one minor release cycle with fallback support before removal in a major release.
 
-### 3.1 コンテナイメージタグの指定
-- **禁止事項**: `latest` タグの使用は本番環境・ステージング環境ともに厳禁とする。予期せぬ自動更新によるシステム停止を防ぐため。
-- **推奨**: リリースされた固定タグ（例: `ghcr.io/kanmon-hq/tollgate:1.0.0`）を使用すること。
+### Breaking Change Protocol
+Any breaking change requires:
+1. Incrementing the **MAJOR** version number.
+2. Publishing migration instructions in `CHANGELOG.md` and `MIGRATION.md`.
+3. Clear architectural notice in release tags.
+
+---
+
+## 3. Product Integration & Version Pinning
+
+Production workloads must **strictly pin** Tollgate image and binary tags:
 
 ```yaml
-# 推奨例 (ECS タスク定義 / Docker Compose)
-services:
-  tollgate:
-    image: ghcr.io/kanmon-hq/tollgate:1.0.0 # 完全なセマンティックバージョンを指定
+# Good: Exact semantic version pinning
+image: ghcr.io/kanmon-hq/tollgate:v1.1.2
+
+# Avoid in Production: Unpredictable upstream changes
+image: ghcr.io/kanmon-hq/tollgate:latest
 ```
-
-### 3.2 フロントエンド UI パッケージ (`@kanmon-hq/tollgate-ui`)
-- `package.json` において、キャレット（`^`）による自動メジャー/マイナー繰り上がりを避け、検証済みバージョンに固定またはチルダ（`~`）でのパッチ許容にとどめる。
-```json
-{
-  "dependencies": {
-    "@kanmon-hq/tollgate-ui": "0.0.5"
-  }
-}
-```
-
----
-
-## 4. 非推奨化 (Deprecation) プロセス
-
-既存の API エンドポイントや設定項目を廃止・変更する場合、以下の段階的プロセスを踏む。
-
-1. **告知 (MINOR リリース)**:
-   - 変更予定の項目を `CHANGELOG.md` およびドキュメントで Deprecated として明記。
-   - 該当 API の呼び出し時に `Warning: 299 - "Deprecated"` ヘッダーを返却、またはサーバーログに警告を出力。
-2. **移行期間の確保**:
-   - 最低でも 1 つのマイナーバージョン（または指定の猶予期間）の間は、旧機能と新機能の双方が利用可能な状態を維持。
-3. **廃止 (次期 MAJOR リリース)**:
-   - メジャーバージョン更新時に旧機能を完全削除。
-
----
-
-## 5. リリース運用フロー
-
-1. すべての変更は `CHANGELOG.md` に Keep a Changelog 形式で記録する。
-2. GitHub Releases にて Git タグ（`vX.Y.Z`）をプッシュし、自動 CI/CD によりマルチアーキテクチャのコンテナイメージをビルド・発行する。
