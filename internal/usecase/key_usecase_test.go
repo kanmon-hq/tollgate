@@ -242,3 +242,67 @@ func TestKeyUsecase_ValidationAndErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestKeyUsecase_RevokeTenantKeys(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Empty tenantID validation error", func(t *testing.T) {
+		u := NewKeyUsecase(&MockKeyRepository{})
+		_, err := u.RevokeTenantKeys(ctx, "")
+		if err == nil {
+			t.Fatalf("expected validation error for empty tenant_id")
+		}
+	})
+
+	t.Run("Revoke tenant keys success and idempotency", func(t *testing.T) {
+		revokedCount := 3
+		callCount := 0
+		mockRepo := &MockKeyRepository{
+			RevokeKeysByTenantIDFunc: func(ctx context.Context, tenantID string) (int, error) {
+				callCount++
+				if tenantID != "tenant-target" {
+					return 0, nil
+				}
+				if callCount == 1 {
+					return revokedCount, nil
+				}
+				// 2回目の実行では既に失効済みのため 0 件
+				return 0, nil
+			},
+		}
+
+		u := NewKeyUsecase(mockRepo)
+
+		// 1回目実行
+		out1, err := u.RevokeTenantKeys(ctx, "tenant-target")
+		if err != nil {
+			t.Fatalf("RevokeTenantKeys failed: %v", err)
+		}
+		if out1.TenantID != "tenant-target" || out1.RevokedCount != 3 {
+			t.Fatalf("unexpected out1: %+v", out1)
+		}
+
+		// 2回目実行（冪等性確認）
+		out2, err := u.RevokeTenantKeys(ctx, "tenant-target")
+		if err != nil {
+			t.Fatalf("RevokeTenantKeys (idempotent call) failed: %v", err)
+		}
+		if out2.TenantID != "tenant-target" || out2.RevokedCount != 0 {
+			t.Fatalf("unexpected out2: %+v", out2)
+		}
+	})
+
+	t.Run("Repo error propagation", func(t *testing.T) {
+		mockRepo := &MockKeyRepository{
+			RevokeKeysByTenantIDFunc: func(ctx context.Context, tenantID string) (int, error) {
+				return 0, errors.New("database connection failed")
+			},
+		}
+
+		u := NewKeyUsecase(mockRepo)
+		_, err := u.RevokeTenantKeys(ctx, "tenant-error")
+		if err == nil {
+			t.Fatalf("expected error from repository")
+		}
+	})
+}

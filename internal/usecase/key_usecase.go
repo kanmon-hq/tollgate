@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -236,3 +238,24 @@ func (u *KeyUsecase) DeleteKey(ctx context.Context, keyID string) error {
 	keyHash := key.GetHash()
 	return u.repo.DeleteKey(ctx, keyHash)
 }
+
+// RevokeTenantKeys はテナントに紐づくすべてのキーを一括失効する (要件 T-4, C-4: 冪等性保証)
+func (u *KeyUsecase) RevokeTenantKeys(ctx context.Context, tenantID string) (*entity.RevokeTenantKeysOutput, error) {
+	trimmed := strings.TrimSpace(tenantID)
+	if trimmed == "" {
+		return nil, errors.New("tenant_id is required")
+	}
+
+	count, err := u.repo.RevokeKeysByTenantID(ctx, trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to revoke keys for tenant %s: %w", trimmed, err)
+	}
+
+	return &entity.RevokeTenantKeysOutput{
+		TenantID:     trimmed,
+		RevokedCount: count,
+		Status:       "revoked",
+	}, nil
+}
+
+

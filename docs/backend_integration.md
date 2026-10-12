@@ -34,6 +34,43 @@ Tollgate での検証成功時、バックエンドサービスへ転送され�
 | `X-Key-ID` | **必須 (常に付与)** | 文字列 (UUID) | 使用された API キーの一意な ID。監査ログやキー単位の利用状況追跡に使用する。 |
 | `X-Key-Prefix` | **必須 (常に付与)** | 文字列 (例: `tlge-live-8f9c`) | API キーの先頭プレフィックス識別子。ログ出力やトラブルシューティングでのキー特定に使用する。 |
 | `X-Service-ID` | **必須 (常に付与)** | 文字列 | 呼び出し元サービス識別子。API キー発行時に設定された `service_id` が常に付与される（クライアント指定値と不一致の場合は `403 Forbidden` で遮断）。 |
+| `X-Request-Id` | **必須 (常に付与)** | 文字列 (UUID) | **分散トレーシング用リクエスト ID**。クライアント指定があればそれを保持し、未指定時は Tollgate が自動生成して下流およびクライアントレスポンスへ付与。 |
+
+### 2.1 ユーザーコンテキストヘッダーの透過と除去 (要件 T-2)
+
+なりすまし（スプーフィング）防止のため、ユーザーコンテキスト情報を含むヘッダーは、**呼び出し元のキー種別に応じて透過または除去（Strip）** される。
+
+| 対象ヘッダー群 | サービスキー経由 (BFF / 内部サービス) | テナントキー経由 (外部テナント) |
+|---|---|---|
+| `X-User-Id`<br>`X-User-Role`<br>`X-User-Email`<br>`X-Signature` 等 | **透過 (Forward)**<br>認証済み BFF からの正当なユーザーコンテキストとして下流へ転送される。 | **強制除去 (Strip)**<br>外部クライアントからの偽装を防ぐため、Tollgate でヘッダーを削除して下流へ転送する。 |
+
+### 2.2 認証コンテキスト解決 & コンフリクト検証ルール
+
+Tollgate リバースプロキシは、クライアントからのヘッダースプーフィング防止とマルチテナント透過連携を両立するため、以下のロジックでヘッダーを制御・検証する：
+
+1. **テナントキー（API キーに `tenant_id` と `service_id` が設定されている場合）**:
+   - クライアントが `X-Tenant-ID` を**指定しない**場合：キーの `tenant_id` を自動注入して下流へ転送。
+   - クライアントが `X-Tenant-ID` を**指定し、キーと一致**する場合：正常通過。
+   - クライアントが `X-Tenant-ID` を**指定し、キーと不一致**の場合：**`403 Forbidden` (`tenant_mismatch`)** で即座にリクエストを拒絶（なりすまし・設定ミスの防止）。
+   - キーの `service_id` を `X-Service-ID` に自動注入（クライアント指定値と不一致の場合は **`403 Forbidden` (`service_mismatch`)** で拒絶）。
+   - 外部からのユーザーコンテキストヘッダー（`X-User-Id` 等）は**すべて除去**。
+2. **サービスキー（API キーに `tenant_id` が未設定、`service_id` が設定されている場合）**:
+   - クライアントが `X-Tenant-ID` を**指定**した場合：クライアント指定値をそのまま透過フォワード。キーの `service_id` を `X-Service-ID` に自動注入（クライアント指定値と不一致の場合は **`403 Forbidden` (`service_mismatch`)** で拒絶）。
+   - クライアントが `X-Tenant-ID` を**未指定**の場合：**`400 Bad Request` (`missing_tenant_id`)** で拒絶（エンド顧客特定不可）。
+   - ユーザーコンテキストヘッダー（`X-User-Id`, `X-Signature` 等）を**そのまま透過**。
+
+### ヘッダーの具体例
+
+```http
+POST /v1/invoices HTTP/1.1
+Host: billing-service:8000
+X-Request-Id: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+X-Tenant-ID: tenant_corp_abc123
+X-Key-ID: 550e8400-e29b-41d4-a716-446655440000
+X-Key-Prefix: tlge-live-8f9c
+X-Service-ID: billing-service
+Content-Type: application/json
+```* | 文字列 | 呼び出し元サービス識別子。API キー発行時に設定された `service_id` が常に付与される（クライアント指定値と不一致の場合は `403 Forbidden` で遮断）。 |
 
 ### 2.1 認証コンテキスト解決 & コンフリクト検証ルール
 
@@ -141,4 +178,40 @@ Content-Type: application/json
   "monthly_quota": 100000
 }
 ```
+
 検証失敗時は `valid: false` となり、`reason`（例: `invalid_key`, `suspended`, `expired`, `scope_mismatch`, `rate_limit_exceeded`, `quota_exceeded`）が返却される。
+
+---
+
+## 7. テナント解約時のクリーンアップ連携 (要件 T-4 / C-4)
+
+本システムのテナント管理サービスがテナント解約イベントを処理する際、Tollgate のテナント一括失効 API を呼び出して、当該テナントに紐づくすべての API キーを無効化する。
+
+### 7.1 エンドポイント仕様
+- **メソッド / パス**: `POST /v1/admin/tenants/{tenant_id}/revoke`
+- **認証**: `Authorization: Bearer <ADMIN_API_KEY>`
+
+### 7.2 冪等性（Idempotency）保証
+- 解約処理の再試行時や、既にすべてのキーが失効済みの状態で呼び出された場合でも、**404 や 500 とせず必ず `200 OK` を返却する**。
+- レスポンス例 (`200 OK`):
+  ```json
+  {
+    "tenant_id": "tenant_corp_abc123",
+    "revoked_count": 3,
+    "status": "revoked"
+  }
+  ```
+- 当該 API の実行完了と同時に、Tollgate のインメモリキャッシュも即座にパージされ、以降そのテナントのキーによるリクエストは即座に `403 Forbidden` (`key_disabled`) で拒絶される。
+
+---
+
+## 8. テナント別クォータ・レート制限の設定方針 (要件 T-3)
+
+Tollgate では過剰設計を防ぎ Single Source of Truth（SSOT）を維持するため、別個のテナント設定テーブルは持たず、**API キー自身に `rate_limit_rpm`（分間上限）と `monthly_quota`（月間上限）を直接設定する**。
+
+* **テナント作成時の初期登録**:
+  テナント契約時に本システムのテナント管理サービスから `POST /v1/admin/keys` を呼び出し、該当テナントの契約プランに応じた `rate_limit_rpm` と `monthly_quota` を指定して API キーを発行する。
+* **制限値の変更・プラン変更**:
+  `PATCH /v1/admin/keys/{key_id}` を呼び出して `rate_limit_rpm` または `monthly_quota` を即座に更新する。
+
+

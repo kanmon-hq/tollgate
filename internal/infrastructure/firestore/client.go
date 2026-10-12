@@ -450,3 +450,60 @@ func (r *FirestoreRepository) GetStats(ctx context.Context, tenantID, serviceID 
 	}
 	return stats, nil
 }
+
+// RevokeKeysByTenantID はテナントに紐づくすべてのキーを一括失効する (冪等性保証)
+func (r *FirestoreRepository) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	if tenantID == "" {
+		return 0, nil
+	}
+	iter := r.client.Collection(r.collection).Where("tenant_id", "==", tenantID).Documents(ctx)
+	defer iter.Stop()
+
+	now := time.Now().UTC()
+	revokedCount := 0
+	batch := r.client.Batch()
+	batchCount := 0
+
+	for {
+		docSnap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return revokedCount, fmt.Errorf("firestore RevokeKeysByTenantID iterate: %w", err)
+		}
+
+		data := docSnap.Data()
+		st, _ := data["status"].(string)
+		act, _ := data["is_active"].(bool)
+		if st == string(entity.StatusRevoked) && !act {
+			continue
+		}
+
+		batch.Update(docSnap.Ref, []firestore.Update{
+			{Path: "status", Value: string(entity.StatusRevoked)},
+			{Path: "is_active", Value: false},
+			{Path: "updated_at", Value: now},
+		})
+		revokedCount++
+		batchCount++
+
+		if batchCount >= 500 {
+			if _, err := batch.Commit(ctx); err != nil {
+				return revokedCount, fmt.Errorf("firestore RevokeKeysByTenantID batch commit: %w", err)
+			}
+			batch = r.client.Batch()
+			batchCount = 0
+		}
+	}
+
+	if batchCount > 0 {
+		if _, err := batch.Commit(ctx); err != nil {
+			return revokedCount, fmt.Errorf("firestore RevokeKeysByTenantID batch commit final: %w", err)
+		}
+	}
+
+	return revokedCount, nil
+}
+
+

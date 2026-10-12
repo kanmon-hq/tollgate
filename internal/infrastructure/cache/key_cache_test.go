@@ -43,6 +43,18 @@ func (m *mockRepo) PutKey(ctx context.Context, key *entity.APIKey) error {
 	return nil
 }
 
+func (m *mockRepo) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	count := 0
+	for _, key := range m.keys {
+		if key.TenantID == tenantID && key.Status != entity.StatusRevoked {
+			key.Status = entity.StatusRevoked
+			key.IsActive = false
+			count++
+		}
+	}
+	return count, nil
+}
+
 func TestCachedKeyRepository(t *testing.T) {
 	mock := &mockRepo{
 		keys: map[string]*entity.APIKey{
@@ -207,6 +219,12 @@ type fullMockRepo struct {
 	incMonthlyCalled  bool
 	lastUsedCalled    bool
 	pingCalled        bool
+	revokeTenantCalled bool
+}
+
+func (m *fullMockRepo) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	m.revokeTenantCalled = true
+	return 1, nil
 }
 
 func (m *fullMockRepo) GetKeyByID(ctx context.Context, keyID string) (*entity.APIKey, error) {
@@ -286,4 +304,71 @@ func TestCachedKeyRepository_DelegatedMethods(t *testing.T) {
 	if !mock.pingCalled {
 		t.Errorf("expected Ping to be delegated")
 	}
+
+	_, _ = cached.RevokeKeysByTenantID(ctx, "t-1")
+	if !mock.revokeTenantCalled {
+		t.Errorf("expected RevokeKeysByTenantID to be delegated")
+	}
 }
+
+func TestCachedKeyRepository_RevokeKeysByTenantID_InvalidatesCache(t *testing.T) {
+	mock := &mockRepo{
+		keys: map[string]*entity.APIKey{
+			"hash-t1": {
+				PK:       "KEY#hash-t1",
+				KeyID:    "kid-t1",
+				TenantID: "tenant-target",
+				IsActive: true,
+				Status:   entity.StatusActive,
+			},
+			"hash-t2": {
+				PK:       "KEY#hash-t2",
+				KeyID:    "kid-t2",
+				TenantID: "other-tenant",
+				IsActive: true,
+				Status:   entity.StatusActive,
+			},
+		},
+	}
+
+	cached := NewCachedKeyRepository(mock, 100*time.Millisecond)
+	ctx := context.Background()
+
+	// 1. キャッシュに載せる
+	_, _ = cached.GetKeyByHash(ctx, "hash-t1")
+	_, _ = cached.GetKeyByHash(ctx, "hash-t2")
+	if mock.getCallCount != 2 {
+		t.Fatalf("expected 2 calls, got %d", mock.getCallCount)
+	}
+
+	// 2. テナント失効呼び出し
+	revokedCount, err := cached.RevokeKeysByTenantID(ctx, "tenant-target")
+	if err != nil {
+		t.Fatalf("RevokeKeysByTenantID failed: %v", err)
+	}
+	if revokedCount != 1 {
+		t.Fatalf("expected 1 revoked key, got %d", revokedCount)
+	}
+
+	// 3. 失効されたテナントのキーを取得 -> キャッシュパージされているため underlying が呼ばれ、StatusRevoked が返る
+	k1, err := cached.GetKeyByHash(ctx, "hash-t1")
+	if err != nil || k1 == nil {
+		t.Fatalf("expected key k1, got %v, err: %v", k1, err)
+	}
+	if mock.getCallCount != 3 {
+		t.Errorf("expected 3 calls (cache invalidated for hash-t1), got %d", mock.getCallCount)
+	}
+	if k1.Status != entity.StatusRevoked || k1.IsActive {
+		t.Errorf("expected k1 to be revoked and inactive, got status=%s isActive=%v", k1.Status, k1.IsActive)
+	}
+
+	// 4. 失効されていないテナントのキーを取得 -> キャッシュが残っているため underlying は呼ばれない
+	k2, err := cached.GetKeyByHash(ctx, "hash-t2")
+	if err != nil || k2 == nil {
+		t.Fatalf("expected key k2, got %v, err: %v", k2, err)
+	}
+	if mock.getCallCount != 3 {
+		t.Errorf("expected still 3 calls (hash-t2 still cached), got %d", mock.getCallCount)
+	}
+}
+

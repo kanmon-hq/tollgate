@@ -1,5 +1,5 @@
 # ─── Build Stage ─────────────────────────────────────────────────────────────
-FROM golang:1.27.1-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS builder
 
 WORKDIR /app
 
@@ -9,13 +9,11 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY go.mod go.sum ./
 RUN go mod download
 
-# ソースをコピーしてテスト＆ビルド
+# ソースをコピーしてビルド
 COPY . .
 
-# 依存解決とテスト、静的バイナリビルド
-RUN go mod tidy && \
-    CGO_ENABLED=0 go test -v ./... && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o tollgate cmd/server/main.go
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o tollgate cmd/server/main.go
 
 # ─── Runtime Stage ───────────────────────────────────────────────────────────
 FROM alpine:3.24

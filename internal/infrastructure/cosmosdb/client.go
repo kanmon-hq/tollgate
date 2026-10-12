@@ -504,3 +504,28 @@ func (r *CosmosDBRepository) GetStats(ctx context.Context, tenantID, serviceID s
 
 	return stats, nil
 }
+
+// RevokeKeysByTenantID はテナントに紐づくすべてのキーを一括失効する (冪等性保証)
+func (r *CosmosDBRepository) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	if tenantID == "" {
+		return 0, nil
+	}
+	keys, err := r.ListKeysByTenant(ctx, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("cosmosdb RevokeKeysByTenantID list: %w", err)
+	}
+
+	revokedCount := 0
+	for _, k := range keys {
+		if k.Status == entity.StatusRevoked && !k.IsActive {
+			continue
+		}
+		if err := r.UpdateKeyStatus(ctx, k.GetHash(), entity.StatusRevoked, false); err != nil {
+			return revokedCount, fmt.Errorf("cosmosdb RevokeKeysByTenantID update key %s: %w", k.KeyID, err)
+		}
+		revokedCount++
+	}
+	return revokedCount, nil
+}
+
+

@@ -48,6 +48,9 @@ func (m *mockHealthRepo) Ping(ctx context.Context) error { return m.pingErr }
 func (m *mockHealthRepo) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
 	return &entity.KeyStats{}, nil
 }
+func (m *mockHealthRepo) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 func TestHealthHandler_HealthCheck(t *testing.T) {
 	_, api := humatest.New(t)

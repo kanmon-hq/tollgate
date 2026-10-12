@@ -489,6 +489,27 @@ func (r *SQLRepository) GetStats(ctx context.Context, tenantID, serviceID string
 	return stats, nil
 }
 
+// RevokeKeysByTenantID はテナントに紐づくすべてのキーを一括失効する (冪等性保証)
+func (r *SQLRepository) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	if tenantID == "" {
+		return 0, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	query := `UPDATE api_keys 
+		SET status = 'revoked', is_active = 0, updated_at = ? 
+		WHERE tenant_id = ? AND (status != 'revoked' OR is_active = 1)`
+	res, err := r.db.ExecContext(ctx, query, now, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("sqlrepo RevokeKeysByTenantID: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("sqlrepo RevokeKeysByTenantID rows affected: %w", err)
+	}
+	return int(affected), nil
+}
+
+
 // ─── スキーマ自動作成 ─────────────────────────────────────────────────────────
 
 const createTableSQL = `

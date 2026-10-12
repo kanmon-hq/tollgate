@@ -47,4 +47,7 @@ type KeyRepository interface {
 
 	// GetStats は指定テナント・サービス (空文字の場合は全件) の統計サマリーを取得する
 	GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error)
+
+	// RevokeKeysByTenantID はテナントに紐づくすべてのキーを一括失効 (status: revoked, is_active: false) する (冪等性保証)
+	RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error)
 }

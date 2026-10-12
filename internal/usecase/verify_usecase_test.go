@@ -38,6 +38,7 @@ type MockKeyRepository struct {
 	UpdateLastUsedAtFunc      func(ctx context.Context, keyHash string, lastUsed time.Time) error
 	PingFunc                  func(ctx context.Context) error
 	GetStatsFunc              func(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error)
+	RevokeKeysByTenantIDFunc  func(ctx context.Context, tenantID string) (int, error)
 }
 
 func (m *MockKeyRepository) PutKey(ctx context.Context, key *entity.APIKey) error {
@@ -137,6 +138,16 @@ func (m *MockKeyRepository) GetStats(ctx context.Context, tenantID, serviceID st
 	}
 	return &entity.KeyStats{}, nil
 }
+
+func (m *MockKeyRepository) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	if m.RevokeKeysByTenantIDFunc != nil {
+		return m.RevokeKeysByTenantIDFunc(ctx, tenantID)
+	}
+	return 0, nil
+}
+
+
+
 
 func TestVerifyUsecase_VerifyKey(t *testing.T) {
 	// デフォルトのモック: 常に許可

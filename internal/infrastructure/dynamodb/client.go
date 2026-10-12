@@ -535,3 +535,59 @@ func (r *DynamoDBRepository) GetStats(ctx context.Context, tenantID, serviceID s
 
 	return stats, nil
 }
+
+// RevokeKeysByTenantID はテナントに紐づくすべてのキーを一括失効する (冪等性保証)
+func (r *DynamoDBRepository) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	if tenantID == "" {
+		return 0, nil
+	}
+
+	queryInput := &dynamodb.QueryInput{
+		TableName:              aws.String(r.tableName),
+		IndexName:              aws.String("GSI_TenantKeys"),
+		KeyConditionExpression: aws.String("tenant_id = :tid"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":tid": &types.AttributeValueMemberS{Value: tenantID},
+		},
+	}
+
+	revokedCount := 0
+	for {
+		out, err := r.client.Query(ctx, queryInput)
+		if err != nil {
+			return 0, fmt.Errorf("query keys by tenant error: %w", err)
+		}
+
+		for _, item := range out.Items {
+			pkVal, ok := item["pk"].(*types.AttributeValueMemberS)
+			if !ok || pkVal.Value == "" {
+				continue
+			}
+			keyHash := strings.TrimPrefix(pkVal.Value, "KEY#")
+
+			// 既に revoked かつ is_active=false であればスキップ
+			isAlreadyRevoked := false
+			if stVal, ok := item["status"].(*types.AttributeValueMemberS); ok && stVal.Value == string(entity.StatusRevoked) {
+				if actVal, ok := item["is_active"].(*types.AttributeValueMemberBOOL); ok && !actVal.Value {
+					isAlreadyRevoked = true
+				}
+			}
+
+			if !isAlreadyRevoked {
+				if err := r.UpdateKeyStatus(ctx, keyHash, entity.StatusRevoked, false); err != nil {
+					return revokedCount, fmt.Errorf("failed to revoke key %s: %w", keyHash, err)
+				}
+				revokedCount++
+			}
+		}
+
+		if out.LastEvaluatedKey == nil {
+			break
+		}
+		queryInput.ExclusiveStartKey = out.LastEvaluatedKey
+	}
+
+	return revokedCount, nil
+}
+
+

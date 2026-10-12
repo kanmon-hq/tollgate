@@ -209,8 +209,11 @@ tollgate/
 │   │   ├── metrics/                # Prometheus メトリクス定義
 │   │   └── ratelimit/              # スライディングウィンドウ・レートリミッター
 │   └── usecase/                    # キー管理 & 検証ユースケースロジック
-├── docs/                           # 詳細仕様ドキュメント
-│   └── backend_integration.md      # 下流サービス連携 & ヘッダー解決規約
+├── docs/                           # 詳細仕様ドキュメント・運用規約
+│   ├── backend_integration.md      # 下流サービス連携 & ヘッダー解決規約
+│   ├── versioning_and_compatibility.md # バージョン固定 & 互換性規約 (C-7)
+│   ├── secret_rotation_guide.md    # 共有シークレットローテーション手順書 (C-2)
+│   └── storage_and_ratelimit_architecture.md # ストレージ & レート制限選定方針 (C-6)
 ├── compose.yaml                    # ローカル開発・検証用 Docker Compose 定義
 ├── Dockerfile                      # マルチステージビルド Dockerfile
 ├── CONTRIBUTING.md                 # コントリビューションガイド
@@ -406,10 +409,10 @@ Tollgate がキー検証・RPM レートリミット消費・クォータ加算�
 
 ## テスト・ベンチマーク実行
 
-### 単体・結合テスト
+### 単体・結合・契約テスト
 
 ```bash
-# 全テスト実行
+# 全テスト実行 (単体テスト + インメモリ契約テスト)
 go test -v ./...
 
 # キャッシュを無効化して実行
@@ -417,6 +420,12 @@ go test -v -count=1 ./...
 
 # レースコンディション検出付きテスト
 go test -race ./...
+
+# 契約テスト単体実行 (セキュリティ境界・ヘッダー透過・テナント隔離の検証)
+go test -v -run TestContract_SecurityAndMultiTenant ./tests
+
+# Docker Compose / 実コンテナ環境向け E2E 契約テスト (コンテナ起動時に実行)
+E2E_BASE_URL="http://localhost:8080" go test -v -run TestE2E_ContractVerification ./tests
 ```
 
 ### 高負荷テスト・ベンチマーク (`cmd/bench`)
@@ -452,6 +461,11 @@ go run ./cmd/bench/main.go -url http://localhost:8080/billing/test -key <API_KEY
 ## 詳細仕様書 & ガイド
 
 - [下流サービス連携・テナント解決・セキュリティ仕様 (docs/backend_integration.md)](docs/backend_integration.md)
+- [契約テスト & CI 自動化ガイド (docs/contract_testing_and_ci.md)](docs/contract_testing_and_ci.md)
+- [AWS ECS Fargate デプロイメントガイド (docs/fargate_deployment_guide.md)](docs/fargate_deployment_guide.md)
+- [バージョン固定 & 互換性規約 (docs/versioning_and_compatibility.md)](docs/versioning_and_compatibility.md)
+- [共有シークレットローテーション手順書 (docs/secret_rotation_guide.md)](docs/secret_rotation_guide.md)
+- [ストレージ & レート制限アーキテクチャ選定方針 (docs/storage_and_ratelimit_architecture.md)](docs/storage_and_ratelimit_architecture.md)
 - [コントリビューションガイド (CONTRIBUTING.md)](CONTRIBUTING.md)
 - [セキュリティポリシー (SECURITY.md)](SECURITY.md)
 

@@ -142,6 +142,22 @@ func (m *fullMockKeyRepo) GetStats(ctx context.Context, tenantID, serviceID stri
 	return stats, nil
 }
 
+func (m *fullMockKeyRepo) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	count := 0
+	for _, k := range m.keysByHash {
+		if k.TenantID == tenantID {
+			if k.Status != entity.StatusRevoked || k.IsActive {
+				k.Status = entity.StatusRevoked
+				k.IsActive = false
+				count++
+			}
+		}
+	}
+	return count, nil
+}
+
+
+
 func TestAdminAPI_FullOperations(t *testing.T) {
 	repo := newFullMockKeyRepo()
 	keyUsecase := usecase.NewKeyUsecase(repo)
@@ -383,4 +399,66 @@ func TestAdminAPI_FullOperations(t *testing.T) {
 			t.Errorf("expected at least 1 total key, got %d", stats.TotalKeys)
 		}
 	})
+
+	t.Run("RevokeTenantKeys success and idempotency (T-4, C-4)", func(t *testing.T) {
+		targetTenant := "tenant-cancellation-test"
+
+		// 2件のキーを作成
+		for i := 1; i <= 2; i++ {
+			createBody, _ := json.Marshal(entity.CreateKeyInput{
+				Name:      "Cancel Test Key",
+				TenantID:  targetTenant,
+				ServiceID: "billing",
+				Scopes:    []string{"billing:read"},
+			})
+			req := httptest.NewRequest(http.MethodPost, "/v1/admin/keys", bytes.NewReader(createBody))
+			req.Header.Set("Authorization", "Bearer "+adminKey)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("failed to create key for cancel test: %d", rec.Code)
+			}
+		}
+
+		// 1回目の解約一括失効呼び出し
+		revokeReq := httptest.NewRequest(http.MethodPost, "/v1/admin/tenants/"+targetTenant+"/revoke", nil)
+		revokeReq.Header.Set("Authorization", "Bearer "+adminKey)
+		revokeRec := httptest.NewRecorder()
+		router.ServeHTTP(revokeRec, revokeReq)
+
+		if revokeRec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK on revokeTenantKeys, got %d (body: %s)", revokeRec.Code, revokeRec.Body.String())
+		}
+
+		var out entity.RevokeTenantKeysOutput
+		if err := json.Unmarshal(revokeRec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("failed to decode revoke output: %v", err)
+		}
+		if out.TenantID != targetTenant {
+			t.Errorf("expected TenantID %q, got %q", targetTenant, out.TenantID)
+		}
+		if out.RevokedCount != 2 {
+			t.Errorf("expected 2 revoked keys, got %d", out.RevokedCount)
+		}
+		if out.Status != "revoked" {
+			t.Errorf("expected status 'revoked', got %q", out.Status)
+		}
+
+		// 2回目の解約一括失効呼び出し (冪等性テスト: 既に失効済みでも 200 OK)
+		revokeRec2 := httptest.NewRecorder()
+		router.ServeHTTP(revokeRec2, revokeReq)
+
+		if revokeRec2.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK on idempotent revokeTenantKeys, got %d", revokeRec2.Code)
+		}
+		var out2 entity.RevokeTenantKeysOutput
+		if err := json.Unmarshal(revokeRec2.Body.Bytes(), &out2); err != nil {
+			t.Fatalf("failed to decode revoke output 2: %v", err)
+		}
+		if out2.RevokedCount != 0 {
+			t.Errorf("expected 0 revoked keys on retry, got %d", out2.RevokedCount)
+		}
+	})
 }
+

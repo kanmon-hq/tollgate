@@ -52,6 +52,9 @@ func (m *mockKeyRepo) Ping(ctx context.Context) error { return nil }
 func (m *mockKeyRepo) GetStats(ctx context.Context, tenantID, serviceID string) (*entity.KeyStats, error) {
 	return &entity.KeyStats{}, nil
 }
+func (m *mockKeyRepo) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	return 0, nil
+}
 
 func setupTestMultiProxy(t *testing.T, routes []*RouteConfig, defaultBackend http.HandlerFunc) (*MultiTargetProxy, *mockKeyRepo) {
 	repo := &mockKeyRepo{keys: make(map[string]*entity.APIKey)}
@@ -397,3 +400,109 @@ func TestMultiTargetProxy_TenantResolutionAndConflictValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestMultiTargetProxy_UserContextHeadersAndRequestID(t *testing.T) {
+	var receivedUserID, receivedSignature, receivedReqID string
+
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedUserID = r.Header.Get("X-User-Id")
+		receivedSignature = r.Header.Get("X-Signature")
+		receivedReqID = r.Header.Get("X-Request-Id")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(backendServer.Close)
+
+	routes := []*RouteConfig{
+		{Prefix: "/api", Target: backendServer.URL, Scope: "api:*", StripPrefix: true},
+	}
+	proxy, repo := setupTestMultiProxy(t, routes, nil)
+
+	tenantKey := "tlge-live-tenant11111111111111111"
+	tenantHash := usecase.HashKey(tenantKey)
+	repo.keys[tenantHash] = &entity.APIKey{
+		KeyID:        "key-tenant-1",
+		KeyPrefix:    "tlge-live-ten1",
+		TenantID:     "tenant-alpha",
+		ServiceID:    "service-main",
+		Scopes:       []string{"api:*"},
+		Status:       entity.StatusActive,
+		IsActive:     true,
+		RateLimitRPM: 1000,
+	}
+
+	serviceKey := "tlge-live-service2222222222222222"
+	serviceHash := usecase.HashKey(serviceKey)
+	repo.keys[serviceHash] = &entity.APIKey{
+		KeyID:        "key-service-1",
+		KeyPrefix:    "tlge-live-svc1",
+		TenantID:     "", // サービスキー (動的マルチテナント)
+		ServiceID:    "service-main",
+		Scopes:       []string{"api:*"},
+		Status:       entity.StatusActive,
+		IsActive:     true,
+		RateLimitRPM: 1000,
+	}
+
+	t.Run("TenantKey strips user context headers (X-User-Id, X-Signature) to prevent spoofing", func(t *testing.T) {
+		receivedUserID = ""
+		receivedSignature = ""
+		receivedReqID = ""
+
+		req := httptest.NewRequest("POST", "/api/v1/test", nil)
+		req.Header.Set("Authorization", "Bearer "+tenantKey)
+		req.Header.Set("X-User-Id", "malicious-spoofed-user")
+		req.Header.Set("X-Signature", "fake-signature")
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+		if receivedUserID != "" {
+			t.Errorf("expected X-User-Id to be stripped for tenant key, but got %q", receivedUserID)
+		}
+		if receivedSignature != "" {
+			t.Errorf("expected X-Signature to be stripped for tenant key, but got %q", receivedSignature)
+		}
+		// X-Request-Id は自動生成され設定されていること
+		if receivedReqID == "" {
+			t.Errorf("expected X-Request-Id to be generated")
+		}
+		if rec.Header().Get("X-Request-Id") != receivedReqID {
+			t.Errorf("expected response X-Request-Id to match forwarded, got %q vs %q",
+				rec.Header().Get("X-Request-Id"), receivedReqID)
+		}
+	})
+
+	t.Run("ServiceKey forwards user context headers intact", func(t *testing.T) {
+		receivedUserID = ""
+		receivedSignature = ""
+		receivedReqID = ""
+
+		req := httptest.NewRequest("POST", "/api/v1/test", nil)
+		req.Header.Set("Authorization", "Bearer "+serviceKey)
+		req.Header.Set("X-Tenant-ID", "tenant-alpha")
+		req.Header.Set("X-User-Id", "legit-bff-user-42")
+		req.Header.Set("X-Signature", "valid-hmac-sig")
+		req.Header.Set("X-Request-Id", "trace-id-xyz-123")
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+		if receivedUserID != "legit-bff-user-42" {
+			t.Errorf("expected X-User-Id to be preserved for service key, got %q", receivedUserID)
+		}
+		if receivedSignature != "valid-hmac-sig" {
+			t.Errorf("expected X-Signature to be preserved for service key, got %q", receivedSignature)
+		}
+		if receivedReqID != "trace-id-xyz-123" {
+			t.Errorf("expected existing X-Request-Id to be preserved, got %q", receivedReqID)
+		}
+		if rec.Header().Get("X-Request-Id") != "trace-id-xyz-123" {
+			t.Errorf("expected response header to have trace-id-xyz-123, got %q", rec.Header().Get("X-Request-Id"))
+		}
+	})
+}
+

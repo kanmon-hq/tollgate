@@ -158,3 +158,11 @@ type KeyStats struct {
 	Services          []string `json:"services,omitempty" doc:"登録済みサービスID一覧"`
 	Tenants           []string `json:"tenants,omitempty" doc:"登録済みテナントID一覧"`
 }
+
+// RevokeTenantKeysOutput はテナント一括失効 API のレスポンス
+type RevokeTenantKeysOutput struct {
+	TenantID     string `json:"tenant_id" doc:"一括失効対象のテナントID"`
+	RevokedCount int    `json:"revoked_count" doc:"失効されたキーの総件数"`
+	Status       string `json:"status" doc:"失効処理ステータス (revoked)" default:"revoked"`
+}
+

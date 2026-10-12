@@ -250,4 +250,34 @@ func RegisterKeyHandlers(api huma.API, u *usecase.KeyUsecase) {
 		resp.Body.Message = "key deleted successfully"
 		return resp, nil
 	})
+
+	// 9. POST /v1/admin/tenants/{tenant_id}/revoke (要件 T-4, C-4)
+	huma.Register(api, huma.Operation{
+		OperationID: "revokeTenantKeys",
+		Method:      http.MethodPost,
+		Path:        "/v1/admin/tenants/{tenant_id}/revoke",
+		Summary:     "テナント全キーの一括失効 (解約・クリーンアップ)",
+		Description: "指定されたテナントに紐づくすべての API キーを一括失効 (revoked) します。既に失効済みでも 200 OK を返す冪等な API です。",
+		Tags:        []string{"Tenants (Admin)"},
+		Security:    adminSec,
+	}, func(ctx context.Context, input *RevokeTenantKeysRequest) (*RevokeTenantKeysResponse, error) {
+		out, err := u.RevokeTenantKeys(ctx, input.TenantID)
+		if err != nil {
+			log.Printf("[ERROR] %s: %v", "テナントキー一括失効失敗", err)
+			return nil, huma.Error500InternalServerError("テナントキー一括失効失敗")
+		}
+		return &RevokeTenantKeysResponse{Body: *out}, nil
+	})
 }
+
+// RevokeTenantKeysRequest はテナント一括失効 API のリクエスト
+type RevokeTenantKeysRequest struct {
+	TenantID string `path:"tenant_id" doc:"失効対象のテナントID" example:"tenant-corp-01"`
+}
+
+// RevokeTenantKeysResponse はテナント一括失効 API のレスポンス
+type RevokeTenantKeysResponse struct {
+	Body entity.RevokeTenantKeysOutput
+}
+
+

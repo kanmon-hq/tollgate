@@ -13,10 +13,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kanmon-hq/tollgate/internal/config"
 	"github.com/kanmon-hq/tollgate/internal/domain/entity"
 	"github.com/kanmon-hq/tollgate/internal/usecase"
 )
+
+// DefaultUserContextHeaders は外部テナントキー経由のアクセス時にスプーフィング防止のため除去すべきヘッダー群 (要件 T-2)
+var DefaultUserContextHeaders = []string{
+	"X-User-Id",
+	"X-User-ID",
+	"X-User-Role",
+	"X-User-Email",
+	"X-User-Context",
+	"X-Signature",
+	"X-End-User-Id",
+}
+
+func getUserContextHeaders() []string {
+	custom := os.Getenv("USER_CONTEXT_HEADERS")
+	if custom == "" {
+		return DefaultUserContextHeaders
+	}
+	parts := strings.Split(custom, ",")
+	var res []string
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			res = append(res, trimmed)
+		}
+	}
+	if len(res) == 0 {
+		return DefaultUserContextHeaders
+	}
+	return res
+}
 
 // RouteConfig は動的ルーティングのルール定義 (config.RouteConfig のエイリアス)
 type RouteConfig = config.RouteConfig
@@ -225,6 +255,14 @@ func (m *MultiTargetProxy) matchRoute(path string) *routeEntry {
 }
 
 func (m *MultiTargetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// リクエスト ID 解決 (要件 C-3: 既存にあれば保持、未指定なら新規採番)
+	reqID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+	if reqID == "" {
+		reqID = uuid.New().String()
+	}
+	r.Header.Set("X-Request-Id", reqID)
+	w.Header().Set("X-Request-Id", reqID)
+
 	// 1. ルートマッチ判定
 	route := m.matchRoute(r.URL.Path)
 	if route == nil && m.defaultProxy == nil {
@@ -317,6 +355,11 @@ func (m *MultiTargetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resolvedTenantID = verifyOut.TenantID
+
+		// 要件 T-2: テナントキー経由の場合、なりすまし防止のためユーザーコンテキストヘッダーを強制除去 (Strip)
+		for _, h := range getUserContextHeaders() {
+			r.Header.Del(h)
+		}
 	} else {
 		// 【サービスキー (動的マルチテナント)】
 		if clientTenantID == "" {
@@ -326,6 +369,8 @@ func (m *MultiTargetProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resolvedTenantID = clientTenantID
+
+		// 要件 T-2: サービスキー (BFF 等) 経由の場合はユーザーコンテキストヘッダーを除去せず透過フォワード
 	}
 
 	r.Header.Set("X-Tenant-ID", resolvedTenantID)

@@ -134,6 +134,20 @@ func (c *CachedKeyRepository) GetStats(ctx context.Context, tenantID, serviceID 
 	return c.underlying.GetStats(ctx, tenantID, serviceID)
 }
 
+func (c *CachedKeyRepository) RevokeKeysByTenantID(ctx context.Context, tenantID string) (int, error) {
+	n, err := c.underlying.RevokeKeysByTenantID(ctx, tenantID)
+	if err == nil {
+		c.mu.Lock()
+		for hash, item := range c.items {
+			if item.key.TenantID == tenantID {
+				delete(c.items, hash)
+			}
+		}
+		c.mu.Unlock()
+	}
+	return n, err
+}
+
 func (c *CachedKeyRepository) invalidate(keyHash string) {
 	c.mu.Lock()
 	delete(c.items, keyHash)
