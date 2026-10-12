@@ -1,15 +1,71 @@
 package tests
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+// resolveAdminKey はテスト実行時の Admin API キーを多層的に解決する
+func resolveAdminKey() string {
+	if k := os.Getenv("E2E_ADMIN_KEY"); k != "" {
+		return k
+	}
+	if k := os.Getenv("ADMIN_API_KEY"); k != "" {
+		return k
+	}
+
+	// .env ファイルの探索 (.env または ../.env)
+	for _, envPath := range []string{".env", "../.env"} {
+		f, err := os.Open(envPath)
+		if err == nil {
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if strings.HasPrefix(line, "ADMIN_API_KEY=") {
+					val := strings.TrimPrefix(line, "ADMIN_API_KEY=")
+					val = strings.Trim(val, "\"'")
+					if val != "" {
+						_ = f.Close()
+						return val
+					}
+				}
+			}
+			_ = f.Close()
+		}
+	}
+
+	// 既定の開発用デフォルトキー
+	return "admin-secret-key-for-local-dev"
+}
+
+// resolveProxyTestPath はプロキシ対象のパスを探索する
+func resolveProxyTestPath() string {
+	for _, envPath := range []string{".env", "../.env"} {
+		data, err := os.ReadFile(envPath)
+		if err == nil {
+			content := string(data)
+			if strings.Contains(content, "/llm") {
+				return "/llm/test"
+			}
+			if strings.Contains(content, "/billing") {
+				return "/billing/test"
+			}
+			if strings.Contains(content, "/users") {
+				return "/users/test"
+			}
+		}
+	}
+	// デフォルト
+	return "/llm/test"
+}
 
 // TestE2E_ContractVerification
 // Docker Compose やステージング環境等の実稼働コンテナを対象に、HTTP経由で契約を検証するE2E契約テスト。
@@ -20,13 +76,8 @@ func TestE2E_ContractVerification(t *testing.T) {
 		t.Skip("Skipping E2E contract test: E2E_BASE_URL is not set (e.g. export E2E_BASE_URL=http://localhost:8080)")
 	}
 
-	adminKey := os.Getenv("E2E_ADMIN_KEY")
-	if adminKey == "" {
-		adminKey = os.Getenv("ADMIN_API_KEY")
-		if adminKey == "" {
-			adminKey = "dev-secret-key-change-in-production"
-		}
-	}
+	adminKey := resolveAdminKey()
+	proxyPath := resolveProxyTestPath()
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -72,11 +123,12 @@ func TestE2E_ContractVerification(t *testing.T) {
 		tenantID := fmt.Sprintf("e2e-tenant-%d", time.Now().UnixNano())
 		serviceID := "billing-service"
 
-		// 3.1 テナントキーの発行
+		// 3.1 テナントキーの発行 (全スコープ許可)
 		createPayload := map[string]interface{}{
 			"name":           "E2E Integration Key",
 			"tenant_id":      tenantID,
 			"service_id":     serviceID,
+			"scopes":         []string{"*"},
 			"rate_limit_rpm": 600,
 		}
 		bodyBytes, _ := json.Marshal(createPayload)
@@ -103,7 +155,7 @@ func TestE2E_ContractVerification(t *testing.T) {
 		}
 
 		// 3.2 テナントコンフリクトの拒絶 (403 Fail-Fast)
-		reqConflict, _ := http.NewRequest(http.MethodGet, baseURL+"/v1/items", nil)
+		reqConflict, _ := http.NewRequest(http.MethodGet, baseURL+proxyPath, nil)
 		reqConflict.Header.Set("Authorization", "Bearer "+createdKey.RawKey)
 		reqConflict.Header.Set("X-Tenant-Id", "forged-different-tenant")
 		resConflict, err := client.Do(reqConflict)
@@ -129,7 +181,7 @@ func TestE2E_ContractVerification(t *testing.T) {
 		}
 
 		// 3.4 失効後はプロキシリクエストが即座に 403 で拒絶されること
-		reqAfterRevoke, _ := http.NewRequest(http.MethodGet, baseURL+"/v1/items", nil)
+		reqAfterRevoke, _ := http.NewRequest(http.MethodGet, baseURL+proxyPath, nil)
 		reqAfterRevoke.Header.Set("Authorization", "Bearer "+createdKey.RawKey)
 		resAfterRevoke, err := client.Do(reqAfterRevoke)
 		if err != nil {

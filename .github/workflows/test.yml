@@ -83,7 +83,7 @@ jobs:
       - name: Run E2E Contract Tests against Real Containers
         env:
           E2E_BASE_URL: "http://localhost:8080"
-          E2E_ADMIN_KEY: "dev-secret-key-change-in-production"
+          E2E_ADMIN_KEY: "admin-secret-key-for-local-dev"
         run: |
           go test -v -run TestE2E_ContractVerification ./tests
 
