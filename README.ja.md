@@ -2,7 +2,7 @@
 
 [English](README.md) | **日本語**
 
-[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![Huma v2](https://img.shields.io/badge/Huma-v2.39+-8A2BE2.svg)](https://huma.rocks/)
 [![DynamoDB](https://img.shields.io/badge/Storage-DynamoDB%20%7C%20CosmosDB%20%7C%20Firestore%20%7C%20SQLite-4053D6.svg)](https://aws.amazon.com/dynamodb/)
 [![Redis / Valkey](https://img.shields.io/badge/RateLimit-Memory%20%7C%20Redis%20%7C%20Valkey%20%7C%20Two--Tier-DC382D.svg)](https://valkey.io/)
@@ -126,7 +126,7 @@ sequenceDiagram
 | **リバースプロキシ機能** | **✅ 内蔵** (動的マルチターゲット) | ✅ 内蔵 | ✅ 内蔵 | △ (検証 API / SDK 主軸) |
 | **マルチテナント認可** | **✅ ネイティブ**<br>(テナントキー / サービスキー二段構成) | △ (プラグイン設定で実現) | △ (プラグイン設定で実現) | △ (キー単位での管理) |
 | **エディション分割** | **なし (OSS 単一ですべての機能を提供)** | あり (Enterprise 版あり) | あり (Enterprise 版あり) | あり (Cloud / Enterprise) |
-| **実装言語** | **Go 1.24+ (ピュア Go)** | Lua / OpenResty / C | Go / C | TypeScript / Next.js / Rust |
+| **実装言語** | **Go 1.27+ (ピュア Go)** | Lua / OpenResty / C | Go / C | TypeScript / Next.js / Rust |
 
 ---
 
@@ -301,7 +301,7 @@ tollgate/
 
 ### 前提条件
 - Docker / nerdctl & Docker Compose
-- （ローカル実行時）Go 1.24+
+- （ローカル実行時）Go 1.27+
 
 ### 1. Docker Compose での起動 (プロファイル制御)
 

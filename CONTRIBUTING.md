@@ -62,7 +62,7 @@ git checkout -b feature/dynamic-route-reload
 ## ローカル開発環境のセットアップ
 
 ### 前提ツール
-- **Go**: 1.24+ (推奨)
+- **Go**: 1.27+ (推奨)
 - **Docker** または **nerdctl** (コンテナランタイム)
 - **Git**
 

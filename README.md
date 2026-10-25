@@ -2,7 +2,7 @@
 
 **English** | [日本語](README.ja.md)
 
-[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![Huma v2](https://img.shields.io/badge/Huma-v2.39+-8A2BE2.svg)](https://huma.rocks/)
 [![DynamoDB](https://img.shields.io/badge/Storage-DynamoDB%20%7C%20CosmosDB%20%7C%20Firestore%20%7C%20SQLite-4053D6.svg)](https://aws.amazon.com/dynamodb/)
 [![Redis / Valkey](https://img.shields.io/badge/RateLimit-Memory%20%7C%20Redis%20%7C%20Valkey%20%7C%20Two--Tier-DC382D.svg)](https://valkey.io/)
