@@ -3,7 +3,7 @@ module github.com/kanmon-hq/tollgate
 go 1.27.1
 
 require (
-	cloud.google.com/go/firestore v1.26.0
+	cloud.google.com/go/firestore v1.29.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3
 	github.com/Azure/azure-sdk-for-go/sdk/data/azcosmos v1.5.0
 	github.com/aws/aws-sdk-go-v2 v1.47.4
