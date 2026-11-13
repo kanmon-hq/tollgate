@@ -17,7 +17,7 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	google.golang.org/api v0.311.0
 	google.golang.org/grpc v1.85.0
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
